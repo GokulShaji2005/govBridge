@@ -64,19 +64,19 @@ export default function SystemMonitor() {
       {/* Header */}
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
-          <span className="text-xs font-bold uppercase tracking-widest text-amber-400">
-            Resilience & Protocol Monitoring
+          <span className="text-xs font-bold uppercase tracking-widest text-indigo-600">
+            Resilience & Protocol Health Monitoring
           </span>
-          <h2 className="text-3xl font-extrabold text-white mt-1">Integration Health Dashboard</h2>
+          <h2 className="text-3xl font-extrabold text-slate-900 mt-1">Integration Health Dashboard</h2>
         </div>
 
         <button
           onClick={handleToggleMunicipality}
           disabled={toggling}
-          className={`px-5 py-3 rounded-2xl font-bold text-xs flex items-center gap-2.5 transition-all shadow-lg ${
+          className={`px-5 py-3 rounded-2xl font-bold text-xs flex items-center gap-2.5 transition-all shadow-md ${
             isMuniDown
-              ? "bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/20"
-              : "bg-rose-600 hover:bg-rose-500 text-white shadow-rose-600/20"
+              ? "bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/20"
+              : "bg-rose-600 hover:bg-rose-700 text-white shadow-rose-600/20"
           }`}
         >
           <Power className="w-4 h-4" />
@@ -86,17 +86,17 @@ export default function SystemMonitor() {
 
       {/* Failure Warning Banner */}
       {isMuniDown && (
-        <div className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-300 flex items-center justify-between">
+        <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-900 flex items-center justify-between shadow-xs">
           <div className="flex items-center gap-3">
-            <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0" />
+            <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0" />
             <div>
-              <strong className="text-sm">Stage 11 Failure Simulation Engaged</strong>
-              <p className="text-xs text-rose-300/80">
+              <strong className="text-sm">Outage Simulation Engaged</strong>
+              <p className="text-xs text-rose-700">
                 Municipality Endpoint returning HTTP 503. Subsequent workflow executions will fail gracefully without server crash.
               </p>
             </div>
           </div>
-          <span className="px-3 py-1 rounded-full bg-rose-500/20 border border-rose-500/40 text-xs font-bold font-mono">
+          <span className="px-3 py-1 rounded-full bg-rose-100 border border-rose-300 text-xs font-bold font-mono text-rose-800">
             OUTAGE SIMULATED
           </span>
         </div>
@@ -110,16 +110,16 @@ export default function SystemMonitor() {
             <div
               key={dept}
               className={`p-6 rounded-3xl glass-panel space-y-4 border transition-all ${
-                isUp ? "border-slate-800" : "border-rose-500/50 bg-rose-950/20"
+                isUp ? "border-slate-200" : "border-rose-300 bg-rose-50/40"
               }`}
             >
               <div className="flex items-center justify-between">
-                <Server className={`w-5 h-5 ${isUp ? "text-blue-400" : "text-rose-400"}`} />
+                <Server className={`w-5 h-5 ${isUp ? "text-indigo-600" : "text-rose-600"}`} />
                 <span
                   className={`px-3 py-1 rounded-full text-xs font-extrabold font-mono ${
                     isUp
-                      ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/30"
-                      : "bg-rose-500/10 text-rose-400 border border-rose-500/30 animate-pulse"
+                      ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                      : "bg-rose-100 text-rose-800 border border-rose-300 animate-pulse"
                   }`}
                 >
                   {info.status}
@@ -127,8 +127,8 @@ export default function SystemMonitor() {
               </div>
 
               <div>
-                <h4 className="text-lg font-bold text-white capitalize">{dept}</h4>
-                <p className="text-xs text-slate-400 mt-1">
+                <h4 className="text-lg font-bold text-slate-900 capitalize">{dept}</h4>
+                <p className="text-xs text-slate-500 mt-1">
                   {dept === "identity" && "National Identity REST API"}
                   {dept === "tax" && "Central Tax XML Gateway"}
                   {dept === "municipality" && "Local Property Legacy System"}
@@ -136,9 +136,9 @@ export default function SystemMonitor() {
                 </p>
               </div>
 
-              <div className="border-t border-slate-800/80 pt-3 flex items-center justify-between text-xs text-slate-400">
+              <div className="border-t border-slate-200 pt-3 flex items-center justify-between text-xs text-slate-500">
                 <span>Latency</span>
-                <span className={`font-mono font-bold ${isUp ? "text-slate-200" : "text-rose-400"}`}>
+                <span className={`font-mono font-bold ${isUp ? "text-slate-900" : "text-rose-600"}`}>
                   {info.latency_ms} ms
                 </span>
               </div>
@@ -148,11 +148,11 @@ export default function SystemMonitor() {
       </div>
 
       <div className="glass-panel p-6 rounded-3xl space-y-3">
-        <div className="flex items-center justify-between text-xs text-slate-400 border-b border-slate-800 pb-2">
+        <div className="flex items-center justify-between text-xs text-slate-500 border-b border-slate-200 pb-2">
           <span>Live Polling Frequency: 1.0s</span>
           <span>Last System Ping: {lastUpdated || "Checking..."}</span>
         </div>
-        <p className="text-xs text-slate-400 leading-relaxed">
+        <p className="text-xs text-slate-500 leading-relaxed">
           The System Monitor continuously verifies connectivity across disparate protocol endpoints. Toggling the Municipality Outage lever demonstrates GovBridge&apos;s fault isolation and retry capability without destabilizing other departmental services.
         </p>
       </div>

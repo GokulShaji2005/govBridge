@@ -1,18 +1,37 @@
 import json
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from sqlmodel import Session, select
 from db import engine
-from models_db import Application, WorkflowStep
-from consent import check_consent_db
+from models_db import Application, WorkflowStep, WorkflowConfig
+from consent import get_active_consent_token, verify_consent_jwt, ConsentMissingException
 import connectors
 import mapping
 from audit import log_audit
-from identity import resolve_or_create_person
+from identity import resolve_or_create_person, get_local_id
 
-STEPS = ["identity", "tax", "address", "registry"]
+# Default fallback step lists if DB config is uninitialized
+DEFAULT_WORKFLOW_STEPS = {
+    "business_registration": ["identity", "tax", "address", "registry"],
+    "trade_license": ["identity", "tax", "address"]
+}
 
-class ConsentMissingException(Exception):
-    pass
+STEP_REQUIRED_SCOPES = {
+    "identity": "identity:verify",
+    "tax": "tax:verify",
+    "address": "address:verify",
+    "registry": "registry:write"
+}
+
+def get_workflow_steps(service_type: str) -> List[str]:
+    """Config-Driven Workflow: Reads step sequences from workflow_configs table in DB."""
+    with Session(engine) as session:
+        cfg = session.exec(select(WorkflowConfig).where(WorkflowConfig.service_type == service_type)).first()
+        if cfg and cfg.steps_json:
+            try:
+                return json.loads(cfg.steps_json)
+            except Exception:
+                pass
+    return DEFAULT_WORKFLOW_STEPS.get(service_type, ["identity", "tax", "address", "registry"])
 
 def update_application_status(app_id: str, status: str):
     with Session(engine) as session:
@@ -42,12 +61,11 @@ def set_step_status(app_id: str, step_name: str, status: str, data_json: Optiona
 def check_reusable_step(citizen_id: str, step_name: str) -> Optional[str]:
     """Check if a previously APPROVED step exists for this citizen."""
     with Session(engine) as session:
-        # Find any application for this citizen
         apps = session.exec(select(Application).where(Application.citizen_id == citizen_id)).all()
         app_ids = [a.id for a in apps]
         if not app_ids:
             return None
-        
+
         reused_step = session.exec(
             select(WorkflowStep).where(
                 WorkflowStep.application_id.in_(app_ids),
@@ -60,7 +78,7 @@ def check_reusable_step(citizen_id: str, step_name: str) -> Optional[str]:
             return reused_step.data_json
         return None
 
-async def run_workflow(application_id: str, allow_reuse: bool = False):
+async def run_workflow(application_id: str, allow_reuse: bool = False, consent_token_override: Optional[str] = None):
     with Session(engine) as session:
         app = session.exec(select(Application).where(Application.id == application_id)).first()
         if not app:
@@ -68,17 +86,25 @@ async def run_workflow(application_id: str, allow_reuse: bool = False):
         citizen_id = app.citizen_id
         service_type = app.service_type
 
-    # 1. Consent Gate Check
-    if not check_consent_db(citizen_id, service_type):
+    # 1. Boundary 3 Consent Gate Check & Token Retrieval
+    consent_jwt = consent_token_override or get_active_consent_token(citizen_id, service_type)
+    if not consent_jwt:
         log_audit(application_id, "CONSENT_CHECK", "FAILED_NO_ACTIVE_CONSENT")
         update_application_status(application_id, "FAILED")
-        raise ConsentMissingException(f"No active consent found for citizen {citizen_id} for purpose {service_type}")
+        raise ConsentMissingException(f"No active signed consent token found for citizen {citizen_id} for purpose {service_type}")
 
-    log_audit(application_id, "CONSENT_CHECK", "VERIFIED_ACTIVE")
+    # Verify root consent token
+    consent_claims = verify_consent_jwt(consent_jwt)
+    log_audit(application_id, "CONSENT_CHECK", "VERIFIED_ACTIVE_SIGNED_JWT")
     update_application_status(application_id, "IN_PROGRESS")
 
-    # Resolve person ID
-    gb_person_id = resolve_or_create_person(citizen_id, pan="ABCDE1234F", owner_code="OWN77821")
+    # Extract self-declared local IDs from signed consent claims
+    local_ids = consent_claims.get("local_ids", {})
+    pan_from_consent = local_ids.get("tax", "ABCDE1234F")
+    owner_code_from_consent = local_ids.get("municipality", "OWN77821")
+
+    # Identity Resolution: Create/Resolve GovBridge Person Anchor (e.g. P-10001)
+    gb_person_id = resolve_or_create_person(citizen_id, local_ids)
     with Session(engine) as session:
         app_db = session.exec(select(Application).where(Application.id == application_id)).first()
         if app_db:
@@ -86,10 +112,22 @@ async def run_workflow(application_id: str, allow_reuse: bool = False):
             session.add(app_db)
             session.commit()
 
-    # Step Execution Loop
-    for step in STEPS:
+    # Load steps dynamically (Config-driven workflow)
+    steps = get_workflow_steps(service_type)
+
+    identity_name = None
+    taxpayer_name = None
+
+    # Step Execution Loop with Defense-in-Depth Scope Checking at EACH Step
+    for step in steps:
         set_step_status(application_id, step, "IN_PROGRESS")
         log_audit(application_id, f"STEP_{step.upper()}", "IN_PROGRESS")
+
+        # Boundary 3 Defense-In-Depth: Re-check scope at individual step!
+        required_scope = STEP_REQUIRED_SCOPES.get(step)
+        if required_scope:
+            verify_consent_jwt(consent_jwt, required_scope=required_scope)
+            log_audit(application_id, f"SCOPE_VERIFY_{step.upper()}", f"SCOPE_OK:{required_scope}")
 
         # Reuse fast-path check
         if allow_reuse and step != "registry":
@@ -101,19 +139,38 @@ async def run_workflow(application_id: str, allow_reuse: bool = False):
 
         try:
             if step == "identity":
-                raw = await connectors.call_identity(citizen_id)
+                # Translate: identity department local ID for citizen
+                dept_local_id = get_local_id(gb_person_id, "identity", default_fallback=citizen_id)
+                raw = await connectors.call_identity(dept_local_id)
                 canonical_obj = mapping.map_identity(raw)
+                identity_name = canonical_obj.name
                 data_json = canonical_obj.model_dump_json()
+
             elif step == "tax":
-                raw_xml = await connectors.call_tax("ABCDE1234F")
+                # Translate: GovBridge person ID -> tax department PAN local ID
+                dept_local_id = get_local_id(gb_person_id, "tax", default_fallback=pan_from_consent)
+                raw_xml = await connectors.call_tax(dept_local_id)
                 canonical_obj = mapping.map_tax(raw_xml)
+                # Parse taxpayer name for cross-department fraud check
+                try:
+                    import xml.etree.ElementTree as ET
+                    root = ET.fromstring(raw_xml.strip())
+                    name_elem = root.find("TaxpayerName")
+                    if name_elem is not None:
+                        taxpayer_name = name_elem.text
+                except Exception:
+                    pass
                 data_json = canonical_obj.model_dump_json()
+
             elif step == "address":
-                raw = await connectors.call_municipality("OWN77821")
+                # Translate: GovBridge person ID -> municipality department owner code
+                dept_local_id = get_local_id(gb_person_id, "municipality", default_fallback=owner_code_from_consent)
+                raw = await connectors.call_municipality(dept_local_id)
                 canonical_obj = mapping.map_municipality(raw)
                 data_json = canonical_obj.model_dump_json()
+
             elif step == "registry":
-                reg_payload = {"applicant_name": "Rahul Kumar", "service": service_type}
+                reg_payload = {"applicant_name": identity_name or "Rahul Kumar", "service": service_type}
                 raw = await connectors.call_registry(reg_payload)
                 data_json = json.dumps(raw)
 
@@ -125,6 +182,17 @@ async def run_workflow(application_id: str, allow_reuse: bool = False):
             log_audit(application_id, f"STEP_{step.upper()}", f"FAILED: {str(e)}")
             update_application_status(application_id, "FAILED")
             return {"status": "FAILED", "failed_step": step, "error": str(e)}
+
+    # Fraud Safeguard — Cross-department consistency check
+    if identity_name and taxpayer_name and identity_name.strip().lower() != taxpayer_name.strip().lower():
+        log_audit(application_id, "FRAUD_CHECK", f"FLAGGED_MANUAL_REVIEW:name_mismatch_identity_vs_tax ({identity_name} vs {taxpayer_name})")
+        update_application_status(application_id, "MANUAL_REVIEW_FLAGGED")
+        return {
+            "status": "MANUAL_REVIEW_FLAGGED",
+            "application_id": application_id,
+            "reason": "name_mismatch_identity_vs_tax",
+            "details": f"Identity dept name '{identity_name}' does not match Tax dept name '{taxpayer_name}'"
+        }
 
     update_application_status(application_id, "APPROVED")
     log_audit(application_id, "WORKFLOW", "APPROVED")

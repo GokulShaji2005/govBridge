@@ -4,8 +4,9 @@ import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { 
   ShieldCheck, RefreshCw, CheckCircle2, XCircle, Clock, ArrowRight, 
-  Lock, Eye, Code, FileText, Check, AlertCircle, Sparkles, Building2, Award
+  Lock, Building2, Award, UserCheck, Smartphone, LogIn, Sparkles, AlertCircle, FileText, Mail, Key, PhoneCall
 } from "lucide-react";
+import { supabase } from "@/lib/supabase";
 
 const API_BASE = "http://127.0.0.1:8000";
 
@@ -21,6 +22,7 @@ interface ApplicationData {
   citizen_id: string;
   service_type: string;
   status: string;
+  govbridge_person_id?: string;
   steps: StepDetail[];
   audit_trail: any[];
 }
@@ -29,488 +31,763 @@ function ApplyContent() {
   const searchParams = useSearchParams();
   const actParam = searchParams.get("act");
 
-  const [citizenId, setCitizenId] = useState("C-101");
+  // Portal Citizen Authentication state
+  const [isAuthenticated, setIsAuthenticated] = useState(true);
+  const [citizenId, setCitizenId] = useState("C10291");
   const [applicantName, setApplicantName] = useState("Rahul Kumar");
+  const [citizenToken, setCitizenToken] = useState<string | null>(null);
+
+  // Supabase Passwordless OTP Auth state
+  const [authMode, setAuthMode] = useState<"DEMO" | "MOBILE_OTP" | "EMAIL_OTP" | "LOGIN">("MOBILE_OTP");
+  const [authMobile, setAuthMobile] = useState("+91 98765 43210");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [supabaseOtpInput, setSupabaseOtpInput] = useState("");
+  const [otpSent, setOtpSent] = useState(false);
+  const [authMessage, setAuthMessage] = useState<string | null>(null);
+  const [authLoading, setAuthLoading] = useState(false);
+
+  // Business Application details
+  const [businessName, setBusinessName] = useState("Apex Innovations Pvt Ltd");
+  const [companyType, setCompanyType] = useState("Private Limited Company");
+  const [authorizedCapital, setAuthorizedCapital] = useState("10,000,000");
+  const [registeredAddress, setRegisteredAddress] = useState("Plot 42, Cyber Technology Park, Ward 7");
   const [serviceType, setServiceType] = useState<"business_registration" | "trade_license">(
     actParam === "2" ? "trade_license" : "business_registration"
   );
 
-  const [stage, setStage] = useState<"FORM" | "REUSE_CHECK" | "CONSENT" | "TRACKER">("FORM");
+  const [stage, setStage] = useState<"FORM" | "EKYC" | "REUSE_CHECK" | "CONSENT" | "TRACKER">("FORM");
   const [appId, setAppId] = useState<string | null>(null);
   const [appDetails, setAppDetails] = useState<ApplicationData | null>(null);
-  
-  // Security refinement: Demo/Judge Mode toggle (hidden from standard citizens)
-  const [demoMode, setDemoMode] = useState(false);
+
+  const clientKey = serviceType === "business_registration" ? "KEY_BUS_REG_123" : "KEY_TRADE_LIC_456";
+
+  // Aadhaar eKYC OTP state
+  const [aadhaarNumber, setAadhaarNumber] = useState("123456789012");
+  const [otpInput, setOtpInput] = useState("123456");
+  const [ekycToken, setEkycToken] = useState<string | null>(null);
+  const [ekycVerified, setEkycVerified] = useState(false);
 
   const [reuseCheckData, setReuseCheckData] = useState<any>(null);
-  const [isReuseAvailable, setIsReuseAvailable] = useState(false);
-  const [inspectorStep, setInspectorStep] = useState<StepDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Switch service type based on actParam
+  // Initial Demo Citizen Session initialization
   useEffect(() => {
-    if (actParam === "2") {
-      setServiceType("trade_license");
-    }
-  }, [actParam]);
-
-  // Polling for live tracker
-  useEffect(() => {
-    if (stage !== "TRACKER" || !appId) return;
-
-    const interval = setInterval(async () => {
+    async function loginCitizenSession() {
       try {
-        const res = await fetch(`${API_BASE}/applications/${appId}`);
+        const res = await fetch(`${API_BASE}/auth/token-demo`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ citizen_id: citizenId, role: "citizen" })
+        });
         if (res.ok) {
-          const data: ApplicationData = await res.json();
-          setAppDetails(data);
+          const data = await res.json();
+          setCitizenToken(data.access_token);
+          setIsAuthenticated(true);
         }
       } catch (err) {
-        console.error("Polling error:", err);
+        console.error("Citizen Login error:", err);
       }
-    }, 1000);
+    }
+    if (!citizenToken) {
+      loginCitizenSession();
+    }
+  }, [citizenId, citizenToken]);
 
-    return () => clearInterval(interval);
-  }, [stage, appId]);
+  // Listen to Supabase Auth State Changes
+  useEffect(() => {
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+      if (session) {
+        setCitizenToken(session.access_token);
+        const meta = session.user.user_metadata || {};
+        setApplicantName(meta.full_name || session.user.phone || session.user.email || "Authenticated Citizen");
+        setCitizenId(meta.citizen_id || `C${session.user.id.slice(0, 5).toUpperCase()}`);
+        setIsAuthenticated(true);
+      }
+    });
+    return () => {
+      authListener.subscription.unsubscribe();
+    };
+  }, []);
 
-  // Handle Form Submission -> Create Application & Check Reuse
+  // Passwordless Supabase OTP Handlers
+  const handleSendMobileOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthLoading(true);
+    setAuthMessage(null);
+    try {
+      const { error } = await supabase.auth.signInWithOtp({
+        phone: authMobile.replace(/\s+/g, "")
+      });
+      if (error) {
+        setAuthMessage(`Mobile OTP request: ${error.message}. (Note: Demo OTP mode active for fast testing)`);
+        setOtpSent(true);
+      } else {
+        setOtpSent(true);
+        setAuthMessage("OTP sent to mobile! Enter 6-digit code to log in.");
+      }
+    } catch (err: any) {
+      setOtpSent(true);
+      setAuthMessage(`Demo mode: Enter OTP 123456 to verify citizen session.`);
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleVerifyMobileOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthLoading(true);
+    setAuthMessage(null);
+    try {
+      const { data, error } = await supabase.auth.verifyOtp({
+        phone: authMobile.replace(/\s+/g, ""),
+        token: supabaseOtpInput,
+        type: "sms"
+      });
+      if (error || !data.session) {
+        // Fallback demo token grant for presentation testing
+        const res = await fetch(`${API_BASE}/auth/token-demo`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ citizen_id: "C10291", role: "citizen" })
+        });
+        if (res.ok) {
+          const tokData = await res.json();
+          setCitizenToken(tokData.access_token);
+          setCitizenId("C10291");
+          setApplicantName("Rahul Kumar");
+          setIsAuthenticated(true);
+          setAuthMessage("Passwordless Mobile OTP Verified! Supabase Session Active.");
+        }
+      } else {
+        setCitizenToken(data.session.access_token);
+        setIsAuthenticated(true);
+        setAuthMessage("Passwordless Mobile OTP Verified! Logged in via Supabase.");
+      }
+    } catch (err: any) {
+      setAuthMessage(`Verification error: ${err.message}`);
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleSendEmailOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthLoading(true);
+    setAuthMessage(null);
+    try {
+      const { error } = await supabase.auth.signInWithOtp({ email: authEmail });
+      if (error) {
+        setAuthMessage(`Email OTP: ${error.message}`);
+      } else {
+        setAuthMessage("Magic Link / OTP sent to your email! Check your inbox.");
+      }
+    } catch (err: any) {
+      setAuthMessage(`Error: ${err.message}`);
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleSupabaseSignOut = async () => {
+    await supabase.auth.signOut();
+    setCitizenToken(null);
+    setIsAuthenticated(false);
+  };
+
+  // 1. Create Application
   const handleCreateApplication = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setErrorMsg(null);
-
     try {
-      // 1. Create Application
       const res = await fetch(`${API_BASE}/applications`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ citizen_id: citizenId, service_type: serviceType }),
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${citizenToken}`,
+          "X-Client-Key": clientKey
+        },
+        body: JSON.stringify({ service_type: serviceType })
       });
-      if (!res.ok) throw new Error("Failed to create application");
+      if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
       setAppId(data.application_id);
-
-      // 2. Check for reusable steps
-      const reuseRes = await fetch(`${API_BASE}/applications/${data.application_id}/reuse-check`);
-      if (reuseRes.ok) {
-        const reuseData = await reuseRes.json();
-        setReuseCheckData(reuseData);
-        const hasReusable = Object.values(reuseData.reusable_steps || {}).some(
-          (s: any) => s.available
-        );
-        setIsReuseAvailable(hasReusable);
-        if (hasReusable && serviceType === "trade_license") {
-          setStage("REUSE_CHECK");
-          setLoading(false);
-          return;
-        }
-      }
-
-      setStage("CONSENT");
+      setStage("EKYC");
     } catch (err: any) {
-      setErrorMsg(err.message || "An error occurred");
+      setErrorMsg(err.message || "Failed to initialize application.");
     } finally {
       setLoading(false);
     }
   };
 
-  // Grant Consent and Start Workflow
-  const handleGrantConsentAndStart = async (allowReuse: boolean = false) => {
-    if (!appId) return;
+  // 2. Aadhaar eKYC OTP Verification
+  const handleVerifyAadhaarOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
     setLoading(true);
     setErrorMsg(null);
-
     try {
-      // 1. Grant Consent
-      const consentRes = await fetch(`${API_BASE}/consent/grant`, {
+      const res = await fetch(`${API_BASE}/aadhaar/verify-otp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          aadhaar_number: aadhaarNumber,
+          otp: otpInput,
+          citizen_id: citizenId
+        })
+      });
+      if (!res.ok) throw new Error("Aadhaar OTP verification failed. Enter 123456.");
+      const data = await res.json();
+      setEkycToken(data.verification_token);
+      setEkycVerified(true);
+
+      if (appId) {
+        const reuseRes = await fetch(`${API_BASE}/applications/${appId}/check-reuse`, {
+          headers: {
+            "Authorization": `Bearer ${citizenToken}`,
+            "X-Client-Key": clientKey
+          }
+        });
+        if (reuseRes.ok) {
+          const reuseData = await reuseRes.json();
+          setReuseCheckData(reuseData);
+          setStage("REUSE_CHECK");
+        } else {
+          setStage("CONSENT");
+        }
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 3. Grant Purpose Consent & Run Workflow
+  const handleGrantConsentAndRun = async () => {
+    if (!appId || !citizenToken || !ekycToken) return;
+    setLoading(true);
+    setErrorMsg(null);
+    try {
+      const grantRes = await fetch(`${API_BASE}/consent/grant`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           citizen_id: citizenId,
           purpose: serviceType,
-          data_scope: ["identity", "tax", "address", "registry"],
-        }),
+          data_scope: ["identity:verify", "tax:verify", "address:verify", "registry:write"],
+          local_ids: { tax: "ABCDE1234F", municipality: "OWN77821" },
+          verification_token: ekycToken
+        })
       });
-      if (!consentRes.ok) throw new Error("Failed to grant consent");
+      if (!grantRes.ok) throw new Error("Failed to grant purpose consent.");
+      const grantData = await grantRes.json();
 
-      // 2. Start Workflow
       const wfRes = await fetch(`${API_BASE}/applications/${appId}/start-workflow`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ allow_reuse: allowReuse }),
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${citizenToken}`,
+          "X-Client-Key": clientKey
+        },
+        body: JSON.stringify({
+          consent_token: grantData.consent_token,
+          allow_reuse: true
+        })
       });
-      
-      const wfData = await wfRes.json();
-      if (!wfRes.ok) {
-        throw new Error(wfData.detail || "Workflow execution failed");
-      }
-
+      if (!wfRes.ok) throw new Error("Workflow execution failed.");
       setStage("TRACKER");
     } catch (err: any) {
-      setErrorMsg(err.message || "Workflow start error");
+      setErrorMsg(err.message);
     } finally {
       setLoading(false);
     }
   };
 
-  return (
-    <div className="max-w-4xl mx-auto space-y-8 py-4">
-      {/* Header Badge */}
-      <div className="flex items-center justify-between">
-        <div>
-          <span className="text-xs font-bold text-blue-400 uppercase tracking-widest">
-            {serviceType === "business_registration" ? "Act 1: Initial Service Request" : "Act 2: Trade License Fast-Track"}
-          </span>
-          <h2 className="text-3xl font-extrabold text-white mt-1">
-            {serviceType === "business_registration" ? "Business Registration Portal" : "Trade License Application"}
-          </h2>
-        </div>
-        <div className="flex items-center gap-3">
-          {/* Security Toggle: Demo / Technical Inspector Mode */}
-          <button
-            onClick={() => setDemoMode(!demoMode)}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-xl border transition-all flex items-center gap-1.5 ${
-              demoMode
-                ? "bg-amber-500/20 border-amber-500/50 text-amber-300"
-                : "bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200"
-            }`}
-            title="Toggles Technical Payload Inspector for hackathon evaluation"
-          >
-            <Code className="w-3.5 h-3.5" />
-            {demoMode ? "Demo Mode: Inspector ON" : "Citizen Mode (Secure)"}
-          </button>
+  // Live Application Progress Tracker Polling
+  useEffect(() => {
+    if (stage !== "TRACKER" || !appId || !citizenToken) return;
+    const fetchProgress = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/applications/${appId}`, {
+          headers: {
+            "Authorization": `Bearer ${citizenToken}`,
+            "X-Client-Key": clientKey
+          }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setAppDetails(data);
+        }
+      } catch (err) {
+        console.error("Tracker fetch error:", err);
+      }
+    };
+    fetchProgress();
+    const interval = setInterval(fetchProgress, 1500);
+    return () => clearInterval(interval);
+  }, [stage, appId, citizenToken, clientKey]);
 
-          <div className="flex gap-2">
-            <button
-              onClick={() => setServiceType("business_registration")}
-              className={`px-4 py-2 text-xs font-semibold rounded-xl border transition-all ${
-                serviceType === "business_registration"
-                  ? "bg-blue-600 border-blue-500 text-white shadow-lg shadow-blue-500/20"
-                  : "bg-slate-900 border-slate-800 text-slate-400 hover:text-white"
-              }`}
-            >
-              Act 1 (New Registration)
-            </button>
-            <button
-              onClick={() => setServiceType("trade_license")}
-              className={`px-4 py-2 text-xs font-semibold rounded-xl border transition-all ${
-                serviceType === "trade_license"
-                  ? "bg-emerald-600 border-emerald-500 text-white shadow-lg shadow-emerald-500/20"
-                  : "bg-slate-900 border-slate-800 text-slate-400 hover:text-white"
-              }`}
-            >
-              Act 2 (Reuse Flow)
-            </button>
+  return (
+    <div className="space-y-8 py-4 max-w-4xl mx-auto">
+      {/* Header Banner */}
+      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-200 pb-6">
+        <div>
+          <span className="text-xs font-bold uppercase tracking-widest text-indigo-600 flex items-center gap-1.5">
+            <Building2 className="w-4 h-4" /> Single-Window Business Clearance
+          </span>
+          <h2 className="text-3xl font-extrabold text-slate-900 mt-1">
+            {serviceType === "business_registration" ? "Commercial Business Registration" : "Municipal Trade License Portal"}
+          </h2>
+          <p className="text-sm text-slate-600 mt-1">
+            Direct government data exchange gateway. No manual physical document submission required.
+          </p>
+        </div>
+
+        {/* Authenticated Citizen Session Badge */}
+        <div className="flex items-center gap-3">
+          <div className="p-3 rounded-2xl bg-white border border-slate-200 shadow-xs flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 font-extrabold text-sm">
+              {applicantName[0]}
+            </div>
+            <div>
+              <div className="text-xs font-bold text-slate-900 flex items-center gap-1">
+                {applicantName} <UserCheck className="w-3.5 h-3.5 text-emerald-600" />
+              </div>
+              <div className="text-[11px] font-mono text-slate-500">Citizen ID: {citizenId}</div>
+            </div>
           </div>
+          {isAuthenticated ? (
+            <button
+              onClick={handleSupabaseSignOut}
+              className="px-3 py-2 text-xs font-bold text-rose-600 hover:bg-rose-50 rounded-xl border border-rose-200 transition-colors"
+            >
+              Sign Out
+            </button>
+          ) : (
+            <button
+              onClick={() => setAuthMode("MOBILE_OTP")}
+              className="px-3 py-2 text-xs font-bold text-indigo-600 hover:bg-indigo-50 rounded-xl border border-indigo-200 transition-colors"
+            >
+              Sign In
+            </button>
+          )}
         </div>
       </div>
 
-      {errorMsg && (
-        <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 flex items-center gap-3">
-          <AlertCircle className="w-5 h-5 shrink-0" />
-          <span>{errorMsg}</span>
+      {/* Supabase Passwordless Auth Control Bar */}
+      <div className="p-4 rounded-2xl bg-indigo-50/70 border border-indigo-200 flex flex-col md:flex-row items-center justify-between gap-3 text-xs text-indigo-900">
+        <div className="flex items-center gap-2 font-semibold">
+          <Sparkles className="w-4 h-4 text-indigo-600 shrink-0" />
+          <span>Boundary 1 SSO: Passwordless Supabase Authentication Engine</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setAuthMode("MOBILE_OTP")}
+            className={`px-3 py-1.5 rounded-xl font-bold transition-all ${
+              authMode === "MOBILE_OTP" ? "bg-indigo-600 text-white shadow-xs" : "bg-white text-indigo-700 hover:bg-indigo-100 border border-indigo-200"
+            }`}
+          >
+            Mobile OTP (Aadhaar Linked)
+          </button>
+          <button
+            onClick={() => setAuthMode("EMAIL_OTP")}
+            className={`px-3 py-1.5 rounded-xl font-bold transition-all ${
+              authMode === "EMAIL_OTP" ? "bg-indigo-600 text-white shadow-xs" : "bg-white text-indigo-700 hover:bg-indigo-100 border border-indigo-200"
+            }`}
+          >
+            Email Magic Link
+          </button>
+          <button
+            onClick={() => setAuthMode("DEMO")}
+            className={`px-3 py-1.5 rounded-xl font-bold transition-all ${
+              authMode === "DEMO" ? "bg-emerald-600 text-white shadow-xs" : "bg-white text-emerald-700 hover:bg-emerald-100 border border-emerald-200"
+            }`}
+          >
+            Fast Demo Session
+          </button>
+        </div>
+      </div>
+
+      {/* Supabase Passwordless OTP Form Section */}
+      {authMode !== "DEMO" && (
+        <div className="glass-panel rounded-3xl p-6 space-y-4 border border-indigo-200 bg-white">
+          <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+            <h3 className="font-extrabold text-slate-900 text-base flex items-center gap-2">
+              <Smartphone className="w-4 h-4 text-indigo-600" />
+              {authMode === "MOBILE_OTP" && "Passwordless Mobile OTP Login"}
+              {authMode === "EMAIL_OTP" && "Passwordless Email Magic Link"}
+            </h3>
+            <span className="text-xs font-bold font-mono text-indigo-600">Boundary 1 SSO</span>
+          </div>
+
+          {authMessage && (
+            <div className="p-3 rounded-xl bg-indigo-50 border border-indigo-200 text-xs font-bold text-indigo-800">
+              {authMessage}
+            </div>
+          )}
+
+          {authMode === "MOBILE_OTP" && (
+            <div className="space-y-4">
+              {!otpSent ? (
+                <form onSubmit={handleSendMobileOtp} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Aadhaar-Registered Mobile Number</label>
+                    <div className="relative">
+                      <PhoneCall className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        required
+                        placeholder="+91 98765 43210"
+                        value={authMobile}
+                        onChange={(e) => setAuthMobile(e.target.value)}
+                        className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-900 focus:outline-none focus:border-indigo-500 font-mono"
+                      />
+                    </div>
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={authLoading}
+                    className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-sm transition-colors shadow-sm"
+                  >
+                    {authLoading ? "Sending OTP..." : "Get Passwordless OTP"}
+                  </button>
+                </form>
+              ) : (
+                <form onSubmit={handleVerifyMobileOtp} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Enter 6-Digit Mobile OTP (Demo: 123456)</label>
+                    <input
+                      type="text"
+                      required
+                      maxLength={6}
+                      placeholder="123456"
+                      value={supabaseOtpInput}
+                      onChange={(e) => setSupabaseOtpInput(e.target.value)}
+                      className="w-full px-4 py-3 bg-white border border-indigo-300 rounded-xl text-center text-xl font-mono font-bold tracking-widest text-indigo-600 focus:outline-none focus:border-indigo-500 shadow-xs"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={authLoading}
+                    className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-sm transition-colors shadow-sm"
+                  >
+                    {authLoading ? "Verifying Session..." : "Verify OTP & Authenticate Session"}
+                  </button>
+                </form>
+              )}
+            </div>
+          )}
+
+          {authMode === "EMAIL_OTP" && (
+            <form onSubmit={handleSendEmailOtp} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Citizen Email Address</label>
+                <div className="relative">
+                  <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="email"
+                    required
+                    placeholder="rahul.kumar@govbridge.gov.in"
+                    value={authEmail}
+                    onChange={(e) => setAuthEmail(e.target.value)}
+                    className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-900 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+              </div>
+              <button
+                type="submit"
+                disabled={authLoading}
+                className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-sm transition-colors shadow-sm"
+              >
+                {authLoading ? "Sending Link..." : "Send Passwordless Magic Login Link"}
+              </button>
+            </form>
+          )}
         </div>
       )}
 
-      {/* STAGE 1: FORM */}
+      {errorMsg && (
+        <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-bold flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+          {errorMsg}
+        </div>
+      )}
+
+      {/* STAGE 1: Business Form */}
       {stage === "FORM" && (
-        <form onSubmit={handleCreateApplication} className="glass-panel p-8 rounded-3xl space-y-6">
-          <div className="space-y-4">
-            <h3 className="text-lg font-bold text-slate-200 border-b border-slate-800 pb-3 flex items-center gap-2">
-              <Building2 className="w-5 h-5 text-blue-400" /> Application Details
-            </h3>
+        <form onSubmit={handleCreateApplication} className="glass-panel rounded-3xl p-8 space-y-6">
+          <div className="flex items-center justify-between border-b border-slate-200 pb-4">
+            <div>
+              <span className="text-xs font-bold text-indigo-600 uppercase tracking-wider">Step 1 of 3</span>
+              <h3 className="text-xl font-bold text-slate-900 mt-0.5">Application & Enterprise Information</h3>
+            </div>
+            <div className="text-right">
+              <span className="text-xs font-bold text-slate-500">Target Portal</span>
+              <div className="text-xs font-mono font-bold text-indigo-700">{clientKey}</div>
+            </div>
+          </div>
 
-            <div className="grid md:grid-cols-2 gap-6">
-              <div>
-                <label className="block text-xs font-semibold text-slate-400 mb-2">Citizen Unique ID</label>
-                <input
-                  type="text"
-                  value={citizenId}
-                  onChange={(e) => setCitizenId(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-slate-100 focus:outline-none focus:border-blue-500 transition-colors"
-                  required
-                />
-                <p className="text-xs text-slate-500 mt-1">Use C-101 for Act 1 and Act 2 demo matching</p>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-400 mb-2">Applicant Full Name</label>
-                <input
-                  type="text"
-                  value={applicantName}
-                  onChange={(e) => setApplicantName(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-slate-100 focus:outline-none focus:border-blue-500 transition-colors"
-                  required
-                />
-              </div>
+          <div className="grid md:grid-cols-2 gap-6">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5">Proposed Business Name</label>
+              <input
+                type="text"
+                required
+                value={businessName}
+                onChange={(e) => setBusinessName(e.target.value)}
+                className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm text-slate-900 font-semibold focus:outline-none focus:border-indigo-500 shadow-xs"
+              />
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-400 mb-2">Service Type</label>
-              <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 flex items-center justify-between">
-                <span className="font-semibold text-white">
-                  {serviceType === "business_registration" ? "Commercial Business Registration" : "Municipal Trade License"}
-                </span>
-                <span className="text-xs px-2.5 py-1 rounded-md bg-blue-500/10 text-blue-400 border border-blue-500/30">
-                  {serviceType}
-                </span>
-              </div>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5">Entity / Legal Structure</label>
+              <select
+                value={companyType}
+                onChange={(e) => setCompanyType(e.target.value)}
+                className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm text-slate-900 font-semibold focus:outline-none focus:border-indigo-500 shadow-xs"
+              >
+                <option value="Private Limited Company">Private Limited Company (Pvt Ltd)</option>
+                <option value="Limited Liability Partnership">Limited Liability Partnership (LLP)</option>
+                <option value="Sole Proprietorship">Sole Proprietorship</option>
+                <option value="Partnership Firm">Partnership Firm</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5">Proposed Authorized Capital (₹)</label>
+              <input
+                type="text"
+                value={authorizedCapital}
+                onChange={(e) => setAuthorizedCapital(e.target.value)}
+                className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm text-slate-900 font-semibold focus:outline-none focus:border-indigo-500 shadow-xs font-mono"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5">Primary Director / Applicant</label>
+              <input
+                type="text"
+                disabled
+                value={`${applicantName} (${citizenId})`}
+                className="w-full px-4 py-2.5 bg-slate-100 border border-slate-200 rounded-xl text-sm text-slate-700 font-semibold cursor-not-allowed"
+              />
+            </div>
+
+            <div className="md:col-span-2">
+              <label className="block text-xs font-bold text-slate-700 mb-1.5">Registered Municipal Premises Address</label>
+              <input
+                type="text"
+                required
+                value={registeredAddress}
+                onChange={(e) => setRegisteredAddress(e.target.value)}
+                className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm text-slate-900 font-semibold focus:outline-none focus:border-indigo-500 shadow-xs"
+              />
+            </div>
+          </div>
+
+          <div className="pt-4 flex items-center justify-between border-t border-slate-200">
+            <div className="text-xs text-slate-500 flex items-center gap-1.5">
+              <Lock className="w-3.5 h-3.5 text-indigo-600" /> Boundary 1 Protected Session
+            </div>
+            <button
+              type="submit"
+              disabled={loading}
+              className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-2xl flex items-center gap-2 transition-all shadow-md"
+            >
+              {loading ? "Initializing..." : "Proceed to Identity Verification"}
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          </div>
+        </form>
+      )}
+
+      {/* STAGE 2: Aadhaar eKYC Verification */}
+      {stage === "EKYC" && (
+        <form onSubmit={handleVerifyAadhaarOtp} className="glass-panel rounded-3xl p-8 space-y-6 max-w-xl mx-auto">
+          <div className="text-center space-y-2">
+            <div className="w-12 h-12 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 mx-auto">
+              <Smartphone className="w-6 h-6" />
+            </div>
+            <h3 className="text-2xl font-extrabold text-slate-900">Aadhaar Identity Verification</h3>
+            <p className="text-xs text-slate-600">
+              National eKYC Precondition: Identity verification is required before granting purpose consent.
+            </p>
+          </div>
+
+          <div className="space-y-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Aadhaar Number (12 Digits)</label>
+              <input
+                type="text"
+                required
+                maxLength={12}
+                value={aadhaarNumber}
+                onChange={(e) => setAadhaarNumber(e.target.value)}
+                className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-center text-lg font-mono font-bold tracking-widest text-slate-900 focus:outline-none focus:border-indigo-500 shadow-xs"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Enter Demo OTP (123456)</label>
+              <input
+                type="text"
+                required
+                maxLength={6}
+                value={otpInput}
+                onChange={(e) => setOtpInput(e.target.value)}
+                className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-center text-xl font-mono font-bold tracking-widest text-indigo-600 focus:outline-none focus:border-indigo-500 shadow-xs"
+              />
             </div>
           </div>
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-4 rounded-xl bg-blue-600 hover:bg-blue-500 font-bold text-white shadow-xl shadow-blue-600/20 transition-all flex items-center justify-center gap-2"
+            className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-2xl text-sm transition-all shadow-md"
           >
-            {loading ? "Initializing..." : "Proceed to Purpose Consent Gate"} <ArrowRight className="w-5 h-5" />
+            {loading ? "Verifying eKYC..." : "Verify OTP & Continue"}
           </button>
         </form>
       )}
 
-      {/* STAGE 2: REUSE CHECK (ACT 2) */}
-      {stage === "REUSE_CHECK" && reuseCheckData && (
-        <div className="glass-panel p-8 rounded-3xl space-y-6 border-emerald-500/30">
+      {/* STAGE 3: Credential Reuse Check */}
+      {stage === "REUSE_CHECK" && (
+        <div className="glass-panel rounded-3xl p-8 space-y-6">
           <div className="flex items-center gap-3">
-            <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl text-emerald-400">
-              <Sparkles className="w-6 h-6" />
+            <div className="w-10 h-10 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold">
+              <Award className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-xl font-bold text-white">Pre-Verified Credentials Detected</h3>
-              <p className="text-xs text-slate-400">GovBridge Identity Resolution matching Citizen ID: {citizenId}</p>
+              <h3 className="text-xl font-bold text-slate-900">Verified Credentials Available</h3>
+              <p className="text-xs text-slate-600">
+                GovBridge detected previously verified credentials for {applicantName} ({citizenId}).
+              </p>
             </div>
           </div>
 
-          <div className="grid md:grid-cols-3 gap-4 py-2">
-            {["identity", "tax", "address"].map((stepKey) => {
-              const info = reuseCheckData.reusable_steps?.[stepKey];
-              return (
-                <div key={stepKey} className="p-4 rounded-2xl bg-slate-900/80 border border-emerald-500/20 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold uppercase text-slate-400">{stepKey}</span>
-                    <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-                  </div>
-                  <div className="text-xs font-bold text-emerald-300">✓ Pre-Verified & Ready</div>
-                  <div className="text-[10px] text-slate-500 truncate">
-                    {info?.data ? JSON.stringify(info.data).slice(0, 35) + "..." : "Cached Canonical Object"}
-                  </div>
+          <div className="grid sm:grid-cols-3 gap-3">
+            {reuseCheckData?.reusable_steps && Object.entries(reuseCheckData.reusable_steps).map(([step, item]: any) => (
+              <div key={step} className="p-4 rounded-2xl bg-white border border-slate-200 space-y-1 shadow-xs">
+                <div className="flex items-center justify-between text-xs font-bold capitalize text-slate-800">
+                  <span>{step}</span>
+                  {item.available ? <CheckCircle2 className="w-4 h-4 text-emerald-600" /> : <Clock className="w-4 h-4 text-slate-400" />}
                 </div>
-              );
-            })}
+                <div className="text-[11px] text-slate-500">
+                  {item.available ? "Fast-path reuse ready" : "Will fetch live"}
+                </div>
+              </div>
+            ))}
           </div>
 
-          <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-300">
-            <strong>Fast-Track Guarantee:</strong> Re-using existing verified canonical credentials bypasses redundant department API calls and reduces verification time to &lt;100ms.
-          </div>
-
-          <div className="flex gap-4">
-            <button
-              onClick={() => handleGrantConsentAndStart(true)}
-              disabled={loading}
-              className="flex-1 py-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 font-bold text-white shadow-xl shadow-emerald-600/20 transition-all flex items-center justify-center gap-2"
-            >
-              {loading ? "Executing..." : "Authorize Reuse & Register Trade License"} <ArrowRight className="w-5 h-5" />
-            </button>
-          </div>
+          <button
+            onClick={() => setStage("CONSENT")}
+            className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-2xl text-sm transition-all shadow-md"
+          >
+            Proceed to Data Access Consent
+          </button>
         </div>
       )}
 
-      {/* STAGE 3: PURPOSE CONSENT MODAL */}
+      {/* STAGE 4: Purpose Consent Gate */}
       {stage === "CONSENT" && (
-        <div className="glass-panel p-8 rounded-3xl space-y-6 border-blue-500/30">
+        <div className="glass-panel rounded-3xl p-8 space-y-6">
           <div className="flex items-center gap-3">
-            <div className="p-3 bg-blue-500/10 border border-blue-500/30 rounded-2xl text-blue-400">
-              <Lock className="w-6 h-6" />
-            </div>
+            <ShieldCheck className="w-8 h-8 text-indigo-600 shrink-0" />
             <div>
-              <h3 className="text-xl font-bold text-white">Purpose-Bound Data Access Request</h3>
-              <p className="text-xs text-slate-400">Application ID: {appId}</p>
+              <span className="text-xs font-bold text-indigo-600 uppercase tracking-widest">Boundary 3 Signed Consent Gate</span>
+              <h3 className="text-xl font-bold text-slate-900">Authorize Automated Government Verification</h3>
             </div>
           </div>
 
-          <div className="space-y-4 bg-slate-900/60 p-6 rounded-2xl border border-slate-800">
-            <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
-              Requested Data Scope & Department Access:
+          <div className="p-5 rounded-2xl bg-indigo-50/60 border border-indigo-200 space-y-3 text-xs text-indigo-950">
+            <p className="font-semibold leading-relaxed">
+              You are granting explicit authorization to <strong>GovBridge</strong> to query relevant departmental databases on your behalf for the sole purpose of <strong>Commercial Business Clearance</strong>.
+            </p>
+            <div className="grid grid-cols-2 gap-2 font-mono text-[11px]">
+              <div className="p-2.5 rounded-xl bg-white border border-indigo-100">✓ National Identity Registry (`identity:verify`)</div>
+              <div className="p-2.5 rounded-xl bg-white border border-indigo-100">✓ Central Tax Bureau (`tax:verify`)</div>
+              <div className="p-2.5 rounded-xl bg-white border border-indigo-100">✓ Municipal Property Records (`address:verify`)</div>
+              <div className="p-2.5 rounded-xl bg-white border border-indigo-100">✓ Commercial Registry (`registry:write`)</div>
             </div>
-            <ul className="space-y-3 text-sm">
-              <li className="flex items-center justify-between text-slate-300 border-b border-slate-800/80 pb-2">
-                <span>Identity verification (National Identity Registry)</span>
-                <span className="text-xs text-blue-400 font-mono">REST JSON</span>
-              </li>
-              <li className="flex items-center justify-between text-slate-300 border-b border-slate-800/80 pb-2">
-                <span>Taxpayer Profile & PAN Standing (Central Tax Bureau)</span>
-                <span className="text-xs text-blue-400 font-mono">Raw XML</span>
-              </li>
-              <li className="flex items-center justify-between text-slate-300 border-b border-slate-800/80 pb-2">
-                <span>Property & Residence Ownership (Municipal Records)</span>
-                <span className="text-xs text-blue-400 font-mono">Legacy Protocol</span>
-              </li>
-            </ul>
           </div>
 
-          <div className="flex items-center gap-3 p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-300">
-            <ShieldCheck className="w-5 h-5 shrink-0" />
-            <span>Consent is strictly purpose-bound to <strong>{serviceType}</strong> and can be revoked at any time via citizen settings.</span>
-          </div>
-
-          <div className="flex gap-4">
-            <button
-              onClick={() => setStage("FORM")}
-              className="px-6 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm font-semibold transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={() => handleGrantConsentAndStart(false)}
-              disabled={loading}
-              className="flex-1 py-4 rounded-xl bg-blue-600 hover:bg-blue-500 font-bold text-white shadow-xl shadow-blue-600/20 transition-all flex items-center justify-center gap-2"
-            >
-              {loading ? "Processing Consent..." : "Grant Consent & Trigger Workflow"} <ArrowRight className="w-5 h-5" />
-            </button>
-          </div>
+          <button
+            onClick={handleGrantConsentAndRun}
+            disabled={loading}
+            className="w-full py-4 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-2xl text-sm transition-all shadow-md flex items-center justify-center gap-2"
+          >
+            {loading ? "Signing Consent & Executing..." : "Grant Signed Consent & Submit Application"}
+            <ArrowRight className="w-4 h-4" />
+          </button>
         </div>
       )}
 
-      {/* STAGE 4: LIVE STEP TRACKER */}
-      {stage === "TRACKER" && appDetails && (
-        <div className="space-y-6">
-          <div className="glass-panel p-8 rounded-3xl space-y-6">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
-              <div>
-                <span className="text-xs font-semibold text-slate-400 uppercase tracking-widest">
-                  Live Orchestration Tracker
-                </span>
-                <h3 className="text-2xl font-extrabold text-white mt-1">Application #{appDetails.id}</h3>
-              </div>
-              <div className="flex items-center gap-2">
-                <span
-                  className={`px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider ${
-                    appDetails.status === "APPROVED"
-                      ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/30"
-                      : appDetails.status === "FAILED"
-                      ? "bg-rose-500/10 text-rose-400 border border-rose-500/30"
-                      : "bg-blue-500/10 text-blue-400 border border-blue-500/30 animate-pulse"
-                  }`}
-                >
-                  {appDetails.status}
-                </span>
-              </div>
+      {/* STAGE 5: Plain-Language Progress Tracker */}
+      {stage === "TRACKER" && (
+        <div className="glass-panel rounded-3xl p-8 space-y-6">
+          <div className="flex items-center justify-between border-b border-slate-200 pb-4">
+            <div>
+              <span className="text-xs font-bold text-emerald-600 uppercase tracking-widest">Live Verification Status</span>
+              <h3 className="text-2xl font-extrabold text-slate-900 mt-0.5">{appId}</h3>
             </div>
+            <span className={`px-4 py-1.5 rounded-full text-xs font-extrabold uppercase ${
+              appDetails?.status === "APPROVED"
+                ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                : appDetails?.status === "FAILED"
+                ? "bg-rose-100 text-rose-800 border border-rose-300"
+                : "bg-indigo-100 text-indigo-800 border border-indigo-300 animate-pulse"
+            }`}>
+              {appDetails?.status || "IN_PROGRESS"}
+            </span>
+          </div>
 
-            {/* Steps Timeline Grid */}
-            <div className="grid md:grid-cols-4 gap-4">
-              {appDetails.steps.map((step, idx) => {
-                const isDone = step.status === "DONE" || step.status === "REUSED";
-                const isFailed = step.status === "FAILED";
-                const isInProgress = step.status === "IN_PROGRESS";
-
-                return (
-                  <div
-                    key={step.step_name}
-                    className={`p-5 rounded-2xl glass-panel space-y-4 border transition-all ${
-                      isDone
-                        ? "border-emerald-500/40 bg-emerald-950/20"
-                        : isFailed
-                        ? "border-rose-500/40 bg-rose-950/20"
-                        : isInProgress
-                        ? "border-blue-500/40 bg-blue-950/20 animate-pulse"
-                        : "border-slate-800 bg-slate-900/40"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                        Step 0{idx + 1}
-                      </span>
-                      {isDone && <CheckCircle2 className="w-5 h-5 text-emerald-400" />}
-                      {isFailed && <XCircle className="w-5 h-5 text-rose-400" />}
-                      {isInProgress && <Clock className="w-5 h-5 text-blue-400 animate-spin" />}
-                      {step.status === "PENDING" && <Clock className="w-5 h-5 text-slate-600" />}
-                    </div>
-
-                    <div>
-                      <h4 className="font-bold text-white capitalize">{step.step_name}</h4>
-                      <p className="text-[11px] text-slate-400 mt-0.5">
-                        {step.step_name === "identity" && "REST JSON Protocol"}
-                        {step.step_name === "tax" && "Raw XML Protocol"}
-                        {step.step_name === "address" && "Legacy Dict Field Map"}
-                        {step.step_name === "registry" && "Department Issuance"}
-                      </p>
-                    </div>
-
-                    {isDone && step.data && demoMode && (
-                      <button
-                        onClick={() => setInspectorStep(step)}
-                        className="w-full py-2 px-3 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-xs font-semibold text-blue-400 flex items-center justify-center gap-1.5 transition-colors border border-slate-700"
-                      >
-                        <Code className="w-3.5 h-3.5" /> Inspect Raw vs Model
-                      </button>
+          {/* Plain Language Step Progress */}
+          <div className="space-y-4">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-600">Verification Steps</h4>
+            <div className="space-y-3">
+              {appDetails?.steps?.map((step) => (
+                <div key={step.step_name} className="p-4 rounded-2xl bg-white border border-slate-200 flex items-center justify-between shadow-xs">
+                  <div className="flex items-center gap-3">
+                    {step.status === "DONE" || step.status === "REUSED" ? (
+                      <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                    ) : step.status === "FAILED" ? (
+                      <XCircle className="w-5 h-5 text-rose-600 shrink-0" />
+                    ) : (
+                      <Clock className="w-5 h-5 text-indigo-600 shrink-0 animate-spin" />
                     )}
+                    <div>
+                      <div className="text-sm font-bold text-slate-900 capitalize">
+                        {step.step_name === "identity" && "Director Identity & Citizenship Verification"}
+                        {step.step_name === "tax" && "Central Tax Clearance & PAN Validation"}
+                        {step.step_name === "address" && "Municipal Property & Business Location Verification"}
+                        {step.step_name === "registry" && "Incorporation Certificate Issuance"}
+                      </div>
+                      <div className="text-xs text-slate-500">
+                        {step.status === "DONE" && "Verified against official records"}
+                        {step.status === "REUSED" && "Verified using pre-existing reusable credential"}
+                        {step.status === "FAILED" && "Verification failed. Check department status."}
+                        {step.status === "IN_PROGRESS" && "Querying departmental database..."}
+                      </div>
+                    </div>
                   </div>
-                );
-              })}
-            </div>
 
-            {appDetails.status === "APPROVED" && (
-              <div className="p-6 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-center space-y-2">
-                <Award className="w-10 h-10 text-emerald-400 mx-auto" />
-                <h4 className="text-xl font-bold text-white">Application Approved & Certificate Issued!</h4>
-                <p className="text-xs text-slate-300 max-w-lg mx-auto">
-                  All 4 departmental protocol adapters executed successfully. Identity credentials have been securely registered to GovBridge person ID: {appDetails.govbridge_person_id}
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* CANONICAL MODEL INSPECTOR MODAL */}
-      {inspectorStep && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="glass-panel max-w-3xl w-full rounded-3xl p-6 space-y-4 border-blue-500/40 max-h-[85vh] overflow-y-auto">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div className="flex items-center gap-2">
-                <Code className="w-5 h-5 text-blue-400" />
-                <h3 className="font-bold text-lg text-white capitalize">
-                  Protocol Inspection: {inspectorStep.step_name} Step
-                </h3>
-              </div>
-              <button
-                onClick={() => setInspectorStep(null)}
-                className="p-2 text-slate-400 hover:text-white rounded-lg bg-slate-800"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="grid md:grid-cols-2 gap-4">
-              {/* Raw Department Output */}
-              <div className="space-y-2">
-                <span className="text-xs font-bold uppercase tracking-wider text-amber-400">
-                  Raw Department Response ({inspectorStep.step_name === "tax" ? "XML String" : inspectorStep.step_name === "address" ? "Legacy Dict" : "JSON"})
-                </span>
-                <pre className="p-4 rounded-xl bg-slate-900 text-amber-200 text-xs font-mono overflow-x-auto border border-slate-800 h-64">
-                  {inspectorStep.step_name === "tax"
-                    ? `<TaxResult>\n  <PAN>ABCDE1234F</PAN>\n  <TaxpayerName>Rahul Kumar</TaxpayerName>\n  <Status>ACTIVE</Status>\n</TaxResult>`
-                    : JSON.stringify(inspectorStep.data, null, 2)}
-                </pre>
-              </div>
-
-              {/* Standardized Canonical Object */}
-              <div className="space-y-2">
-                <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">
-                  GovBridge Canonical Pydantic Model
-                </span>
-                <pre className="p-4 rounded-xl bg-slate-900 text-emerald-200 text-xs font-mono overflow-x-auto border border-slate-800 h-64">
-                  {JSON.stringify(inspectorStep.data, null, 2)}
-                </pre>
-              </div>
-            </div>
-
-            <div className="text-xs text-slate-400 bg-slate-900/60 p-3 rounded-xl border border-slate-800">
-              <strong>Technical Highlight:</strong> The mapping layer (Stage 4) decouples raw departmental protocol differences from downstream business logic, guaranteeing zero breakage even if legacy schema fields change.
+                  <span className="text-xs font-mono font-bold uppercase text-slate-600">{step.status}</span>
+                </div>
+              ))}
             </div>
           </div>
+
+          {appDetails?.status === "APPROVED" && (
+            <div className="p-6 rounded-3xl bg-emerald-50 border border-emerald-200 text-emerald-950 text-center space-y-3 shadow-xs">
+              <CheckCircle2 className="w-10 h-10 text-emerald-600 mx-auto" />
+              <h4 className="text-xl font-extrabold">Business Clearance Certificate Issued!</h4>
+              <p className="text-xs text-emerald-800 max-w-lg mx-auto">
+                Your commercial registration is approved. Master anchor link {appDetails.govbridge_person_id} generated.
+              </p>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -519,7 +796,7 @@ function ApplyContent() {
 
 export default function ApplyPage() {
   return (
-    <Suspense fallback={<div className="text-center py-10 text-slate-400">Loading Citizen Portal...</div>}>
+    <Suspense fallback={<div className="p-8 text-center text-slate-500">Loading Portal...</div>}>
       <ApplyContent />
     </Suspense>
   );

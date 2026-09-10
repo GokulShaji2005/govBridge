@@ -1,0 +1,113 @@
+Traceback (most recent call last):
+  File "C:\Users\hp\AppData\Local\Programs\Python\Python310\lib\site-packages\sqlalchemy\engine\base.py", line 1967, in _exec_single_context
+    self.dialect.do_execute(
+  File "C:\Users\hp\AppData\Local\Programs\Python\Python310\lib\site-packages\sqlalchemy\engine\default.py", line 941, in do_execute
+    cursor.execute(statement, parameters)
+sqlite3.OperationalError: no such column: consents.consent_token
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "<string>", line 3, in <module>
+  File "C:\Users\hp\AppData\Local\Programs\Python\Python310\lib\asyncio\runners.py", line 44, in run
+    return loop.run_until_complete(main)
+  File "C:\Users\hp\AppData\Local\Programs\Python\Python310\lib\asyncio\base_events.py", line 646, in run_until_complete
+    return future.result()
+  File "D:\sih\govbridge\backend\test_spec_auth.py", line 59, in main
+    res_grant = client.post(
+  File "C:\Users\hp\AppData\Local\Programs\Python\Python310\lib\site-packages\starlette\testclient.py", line 593, in post
+    return super().post(
+  File "C:\Users\hp\AppData\Local\Programs\Python\Python310\lib\site-packages\httpx\_client.py", line 1136, in post
+    return self.request(
+  File "C:\Users\hp\AppData\Local\Programs\Python\Python310\lib\site-packages\starlette\testclient.py", line 484, in request
+    return super().request(
+  File "C:\Users\hp\AppData\Local\Programs\Python\Python310\lib\site-packages\httpx\_client.py", line 821, in request
+    return self.send(request, auth=auth, follow_redirects=follow_redirects)
+  File "C:\Users\hp\AppData\Local\Programs\Python\Python310\lib\site-packages\httpx\_client.py", line 908, in send
+    response = self._send_handling_auth(
+  File "C:\Users\hp\AppData\Local\Programs\Python\Python310\lib\site-packages\httpx\_client.py", line 936, in _send_handling_auth
+    response = self._send_handling_redirects(
+  File "C:\Users\hp\AppData\Local\Programs\Python\Python310\lib\site-packages\httpx\_client.py", line 973, in _send_handling_redirects
+    response = self._send_single_request(request)
+  File "C:\Users\hp\AppData\Local\Programs\Python\Python310\lib\site-packages\httpx\_client.py", line 1009, in _send_single_request
+    response = transport.handle_request(request)
+  File "C:\Users\hp\AppData\Local\Programs\Python\Python310\lib\site-packages\starlette\testclient.py", line 377, in handle_request
+    raise exc
+  File "C:\Users\hp\AppData\Local\Programs\Python\Python310\lib\site-packages\starlette\testclient.py", line 374, in handle_request
+    portal.call(self.app, scope, receive, send)
+  File "C:\Users\hp\AppData\Local\Programs\Python\Python310\lib\site-packages\anyio\from_thread.py", line 283, in call
+    return cast(T_Retval, self.start_task_soon(func, *args).result())
+  File "C:\Users\hp\AppData\Local\Programs\Python\Python310\lib\concurrent\futures\_base.py", line 446, in result
+    return self.__get_result()
+  File "C:\Users\hp\AppData\Local\Programs\Python\Python310\lib\concurrent\futures\_base.py", line 391, in __get_result
+    raise self._exception
+  File "C:\Users\hp\AppData\Local\Programs\Python\Python310\lib\site-packages\anyio\from_thread.py", line 219, in _call_func
+    retval = await retval
+  File "C:\Users\hp\AppData\Local\Programs\Python\Python310\lib\site-packages\fastapi\applications.py", line 1054, in __call__
+    await super().__call__(scope, receive, send)
+  File "C:\Users\hp\AppData\Local\Programs\Python\Python310\lib\site-packages\starlette\applications.py", line 113, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\hp\AppData\Local\Programs\Python\Python310\lib\site-packages\starlette\middleware\errors.py", line 187, in __call__
+    raise exc
+  File "C:\Users\hp\AppData\Local\Programs\Python\Python310\lib\site-packages\starlette\middleware\errors.py", line 165, in __call__
+    await self.app(scope, receive, _send)
+  File "C:\Users\hp\AppData\Local\Programs\Python\Python310\lib\site-packages\starlette\middleware\cors.py", line 85, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\hp\AppData\Local\Programs\Python\Python310\lib\site-packages\starlette\middleware\exceptions.py", line 62, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "C:\Users\hp\AppData\Local\Programs\Python\Python310\lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "C:\Users\hp\AppData\Local\Programs\Python\Python310\lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\hp\AppData\Local\Programs\Python\Python310\lib\site-packages\starlette\routing.py", line 715, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\hp\AppData\Local\Programs\Python\Python310\lib\site-packages\starlette\routing.py", line 735, in app
+    await route.handle(scope, receive, send)
+  File "C:\Users\hp\AppData\Local\Programs\Python\Python310\lib\site-packages\starlette\routing.py", line 288, in handle
+    await self.app(scope, receive, send)
+  File "C:\Users\hp\AppData\Local\Programs\Python\Python310\lib\site-packages\starlette\routing.py", line 76, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "C:\Users\hp\AppData\Local\Programs\Python\Python310\lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "C:\Users\hp\AppData\Local\Programs\Python\Python310\lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\hp\AppData\Local\Programs\Python\Python310\lib\site-packages\starlette\routing.py", line 73, in app
+    response = await f(request)
+  File "C:\Users\hp\AppData\Local\Programs\Python\Python310\lib\site-packages\fastapi\routing.py", line 301, in app
+    raw_response = await run_endpoint_function(
+  File "C:\Users\hp\AppData\Local\Programs\Python\Python310\lib\site-packages\fastapi\routing.py", line 212, in run_endpoint_function
+    return await dependant.call(**values)
+  File "D:\sih\govbridge\backend\consent.py", line 225, in grant_consent
+    consent_info = grant_consent_db(
+  File "D:\sih\govbridge\backend\consent.py", line 117, in grant_consent_db
+    existing_list = session.exec(
+  File "C:\Users\hp\AppData\Local\Programs\Python\Python310\lib\site-packages\sqlmodel\orm\session.py", line 75, in exec
+    results = super().execute(
+  File "C:\Users\hp\AppData\Local\Programs\Python\Python310\lib\site-packages\sqlalchemy\orm\session.py", line 2362, in execute
+    return self._execute_internal(
+  File "C:\Users\hp\AppData\Local\Programs\Python\Python310\lib\site-packages\sqlalchemy\orm\session.py", line 2247, in _execute_internal
+    result: Result[Any] = compile_state_cls.orm_execute_statement(
+  File "C:\Users\hp\AppData\Local\Programs\Python\Python310\lib\site-packages\sqlalchemy\orm\context.py", line 305, in orm_execute_statement
+    result = conn.execute(
+  File "C:\Users\hp\AppData\Local\Programs\Python\Python310\lib\site-packages\sqlalchemy\engine\base.py", line 1418, in execute
+    return meth(
+  File "C:\Users\hp\AppData\Local\Programs\Python\Python310\lib\site-packages\sqlalchemy\sql\elements.py", line 515, in _execute_on_connection
+    return connection._execute_clauseelement(
+  File "C:\Users\hp\AppData\Local\Programs\Python\Python310\lib\site-packages\sqlalchemy\engine\base.py", line 1640, in _execute_clauseelement
+    ret = self._execute_context(
+  File "C:\Users\hp\AppData\Local\Programs\Python\Python310\lib\site-packages\sqlalchemy\engine\base.py", line 1846, in _execute_context
+    return self._exec_single_context(
+  File "C:\Users\hp\AppData\Local\Programs\Python\Python310\lib\site-packages\sqlalchemy\engine\base.py", line 1986, in _exec_single_context
+    self._handle_dbapi_exception(
+  File "C:\Users\hp\AppData\Local\Programs\Python\Python310\lib\site-packages\sqlalchemy\engine\base.py", line 2355, in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+  File "C:\Users\hp\AppData\Local\Programs\Python\Python310\lib\site-packages\sqlalchemy\engine\base.py", line 1967, in _exec_single_context
+    self.dialect.do_execute(
+  File "C:\Users\hp\AppData\Local\Programs\Python\Python310\lib\site-packages\sqlalchemy\engine\default.py", line 941, in do_execute
+    cursor.execute(statement, parameters)
+sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) no such column: consents.consent_token
+[SQL: SELECT consents.id, consents.citizen_id, consents.purpose, consents.status, consents.consent_token, consents.granted_at 
+FROM consents 
+WHERE consents.citizen_id = ? AND consents.purpose = ? AND consents.status = ?]
+[parameters: ('C10291', 'business_registration', 'ACTIVE')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
