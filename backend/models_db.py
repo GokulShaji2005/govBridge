@@ -85,3 +85,28 @@ class AuditLog(SQLModel, table=True):
     result: str  # "SUCCESS" | "FAILED" | "REVOKED" | "SKIPPED_REUSE"
     timestamp: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
 
+class DeptIdentityRegistry(SQLModel, table=True):
+    __tablename__ = "dept_identity_registry"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    aadhaar_ref: str = Field(index=True, unique=True)
+    full_name: str
+    date_of_birth: str
+    address: str
+
+class DeptTaxRegistry(SQLModel, table=True):
+    __tablename__ = "dept_tax_registry"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    pan_number: str = Field(index=True, unique=True)
+    taxpayer_name: str
+    assessment_year: str = "2025-2026"
+    filing_status: str = "COMPLIANT"
+
+class DeptPropertyRegistry(SQLModel, table=True):
+    __tablename__ = "dept_property_registry"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    owner_code: str = Field(index=True, unique=True)
+    owner_name: str
+    property_address: str
+    tax_cleared: bool = True
+
+

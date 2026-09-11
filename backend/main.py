@@ -22,6 +22,7 @@ from auth import (
 init_db()
 
 def seed_defaults():
+    from models_db import DeptIdentityRegistry, DeptTaxRegistry, DeptPropertyRegistry
     with Session(engine) as session:
         # Seed workflow configs
         if not session.exec(select(WorkflowConfig).where(WorkflowConfig.service_type == "business_registration")).first():
@@ -51,6 +52,51 @@ def seed_defaults():
                 name="Officer Admin",
                 role="officer"
             ))
+
+        # Seed Department Registries (Mock Department Databases)
+        # 1. Identity Registry (UIDAI DB)
+        identity_records = [
+            ("123456789012", "Rahul Kumar", "1990-05-12", "Plot 42, Cyber Park, Ward 7"),
+            ("999988887777", "Anjali Sharma", "1995-08-20", "Suite 101, IT Corridor, Ward 12"),
+            ("888877776666", "Vikram Patel", "1988-11-04", "15 MG Road, Ward 4, Bengaluru"),
+            ("555544443333", "Priya Nair", "1992-03-18", "42 Marine Drive, Ward 1, Mumbai"),
+            ("777766665555", "Amitabh Roy", "1985-07-25", "88 Park Street, Ward 9, Kolkata"),
+            ("333322221111", "Sneha Reddy", "1997-09-30", "23 Jubilee Hills, Ward 15, Hyderabad"),
+            ("666655554444", "Mohammed Ali Khan", "1991-01-15", "7 Sector 17, Ward 2, Chandigarh")
+        ]
+        for a_ref, name, dob, addr in identity_records:
+            if not session.exec(select(DeptIdentityRegistry).where(DeptIdentityRegistry.aadhaar_ref == a_ref)).first():
+                session.add(DeptIdentityRegistry(aadhaar_ref=a_ref, full_name=name, date_of_birth=dob, address=addr))
+
+        # 2. Income Tax Registry (CBDT DB)
+        tax_records = [
+            ("ABCDE1234F", "Rahul Kumar"),
+            ("PANX99999F", "Anjali Sharma"),
+            ("MISMATCH99F", "Imposter Taxpayer Name"),
+            ("VPATL1122K", "Vikram Patel"),
+            ("PNAIR4455M", "Priya Nair"),
+            ("AROY7788P", "Amitabh Roy"),
+            ("SREDD3344Q", "Sneha Reddy"),
+            ("MKHAN6677R", "Mohammed Ali Khan")
+        ]
+        for pan, tp_name in tax_records:
+            if not session.exec(select(DeptTaxRegistry).where(DeptTaxRegistry.pan_number == pan)).first():
+                session.add(DeptTaxRegistry(pan_number=pan, taxpayer_name=tp_name, assessment_year="2025-2026", filing_status="COMPLIANT"))
+
+        # 3. Municipal Property Registry (City Revenue DB)
+        property_records = [
+            ("OWN77821", "Rahul Kumar", "Plot 42, Cyber Park, Ward 7"),
+            ("OWN55443", "Anjali Sharma", "Suite 101, IT Corridor, Ward 12"),
+            ("OWN11223", "Vikram Patel", "15 MG Road, Ward 4, Bengaluru"),
+            ("OWN44556", "Priya Nair", "42 Marine Drive, Ward 1, Mumbai"),
+            ("OWN77889", "Amitabh Roy", "88 Park Street, Ward 9, Kolkata"),
+            ("OWN33445", "Sneha Reddy", "23 Jubilee Hills, Ward 15, Hyderabad"),
+            ("OWN66778", "Mohammed Ali Khan", "7 Sector 17, Ward 2, Chandigarh")
+        ]
+        for o_code, o_name, p_addr in property_records:
+            if not session.exec(select(DeptPropertyRegistry).where(DeptPropertyRegistry.owner_code == o_code)).first():
+                session.add(DeptPropertyRegistry(owner_code=o_code, owner_name=o_name, property_address=p_addr, tax_cleared=True))
+
         session.commit()
 
 seed_defaults()
@@ -310,6 +356,26 @@ async def toggle_municipality():
         "status": "SUCCESS",
         "MUNICIPALITY_DOWN": mock_departments.MUNICIPALITY_DOWN,
         "message": f"Municipality server set to {'DOWN (503)' if mock_departments.MUNICIPALITY_DOWN else 'UP (200)'}"
+    }
+
+@app.post("/admin/wipe-db")
+async def wipe_database_data():
+    """Wipes all applications, workflow steps, audit logs, consents, aadhaar records, and identity mappings."""
+    from models_db import Application, WorkflowStep, Consent, ConsentItem, RevokedConsentToken, AadhaarVerificationRecord, Person, IdentityMapping, AuditLog
+    with Session(engine) as session:
+        session.exec(WorkflowStep.__table__.delete())
+        session.exec(Application.__table__.delete())
+        session.exec(ConsentItem.__table__.delete())
+        session.exec(Consent.__table__.delete())
+        session.exec(RevokedConsentToken.__table__.delete())
+        session.exec(AadhaarVerificationRecord.__table__.delete())
+        session.exec(IdentityMapping.__table__.delete())
+        session.exec(Person.__table__.delete())
+        session.exec(AuditLog.__table__.delete())
+        session.commit()
+    return {
+        "status": "SUCCESS",
+        "message": "Database wiped successfully! All applications, steps, consents, and audit logs cleared."
     }
 
 @app.get("/health")

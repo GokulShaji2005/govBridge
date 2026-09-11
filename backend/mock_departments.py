@@ -2,7 +2,7 @@ import uuid
 from typing import Optional
 from fastapi import APIRouter, Response, HTTPException, Header, status
 from pydantic import BaseModel
-from sqlmodel import Session
+from sqlmodel import Session, select
 from db import engine
 from models_db import AadhaarVerificationRecord
 
@@ -43,15 +43,22 @@ class AadhaarVerifyOtpRequest(BaseModel):
     aadhaar_number: str
     otp: str
     citizen_id: Optional[str] = "C10291"
+    name: Optional[str] = "Rahul Kumar"
+    date_of_birth: Optional[str] = "1998-04-12"
+    house_number: Optional[str] = "12A"
+    locality: Optional[str] = "Kumaranallur"
+    city: Optional[str] = "Kottayam"
 
 class IdentityVerifyRequest(BaseModel):
     citizen_id: str
 
 class TaxVerifyRequest(BaseModel):
     pan: str
+    taxpayer_name: Optional[str] = None
 
 class MunicipalityVerifyRequest(BaseModel):
     owner_code: str
+    owner_name: Optional[str] = None
 
 class BusinessRegisterRequest(BaseModel):
     applicant_name: Optional[str] = "Rahul Kumar"
@@ -70,36 +77,61 @@ async def verify_aadhaar_otp(req: AadhaarVerifyOtpRequest):
     v_token = f"EKYC-VERIFIED-{uuid.uuid4().hex[:8].upper()}"
     citizen_id = req.citizen_id or "C10291"
     aadhaar_ref = f"XXXX-XXXX-{req.aadhaar_number[-4:] if len(req.aadhaar_number) >= 4 else '1234'}"
+    c_name = req.name or "Rahul Kumar"
+    c_dob = req.date_of_birth or "1998-04-12"
+    h_no = req.house_number or "12A"
+    loc = req.locality or "Kumaranallur"
+    city_val = req.city or "Kottayam"
 
     with Session(engine) as session:
-        rec = AadhaarVerificationRecord(
-            verification_token=v_token,
-            citizen_id=citizen_id,
-            aadhaar_ref=aadhaar_ref,
-            name="Rahul Kumar",
-            date_of_birth="1998-04-12"
-        )
-        session.add(rec)
+        # Check if record exists for this citizen_id, update or create
+        rec = session.exec(select(AadhaarVerificationRecord).where(AadhaarVerificationRecord.citizen_id == citizen_id)).first()
+        if rec:
+            rec.verification_token = v_token
+            rec.aadhaar_ref = aadhaar_ref
+            rec.name = c_name
+            rec.date_of_birth = c_dob
+            session.add(rec)
+        else:
+            rec = AadhaarVerificationRecord(
+                verification_token=v_token,
+                citizen_id=citizen_id,
+                aadhaar_ref=aadhaar_ref,
+                name=c_name,
+                date_of_birth=c_dob
+            )
+            session.add(rec)
         session.commit()
 
     return {
         "verified": True,
         "verification_token": v_token,
         "citizen_id": citizen_id,
-        "name": "Rahul Kumar",
-        "dateOfBirth": "1998-04-12",
-        "address": {"houseNumber": "12A", "locality": "Kumaranallur", "city": "Kottayam"},
+        "name": c_name,
+        "dateOfBirth": c_dob,
+        "address": {"houseNumber": h_no, "locality": loc, "city": city_val},
         "aadhaarRef": aadhaar_ref
     }
 
 @router.post("/mock/identity/verify")
 async def verify_identity(req: IdentityVerifyRequest, authorization: Optional[str] = Header(None)):
     validate_department_token(authorization, "identity", "identity:verify")
+    
+    # Try retrieving verified eKYC record from DB
+    c_name = "Rahul Kumar"
+    c_dob = "1998-04-12"
+    with Session(engine) as session:
+        rec = session.exec(select(AadhaarVerificationRecord).where(AadhaarVerificationRecord.citizen_id == req.citizen_id)).first()
+        if rec and rec.name:
+            c_name = rec.name
+            if rec.date_of_birth:
+                c_dob = rec.date_of_birth
+
     return {
         "verified": True,
         "citizenId": req.citizen_id,
-        "name": "Rahul Kumar",
-        "dateOfBirth": "1998-04-12",
+        "name": c_name,
+        "dateOfBirth": c_dob,
         "address": {
             "houseNumber": "12A",
             "locality": "Kumaranallur",
@@ -110,7 +142,23 @@ async def verify_identity(req: IdentityVerifyRequest, authorization: Optional[st
 @router.post("/mock/tax/verify")
 async def verify_tax(req: TaxVerifyRequest, authorization: Optional[str] = Header(None)):
     validate_department_token(authorization, "tax", "tax:verify")
-    xml_content = f"""<TaxResult><PAN>{req.pan}</PAN><TaxpayerName>Rahul Kumar</TaxpayerName><Status>ACTIVE</Status></TaxResult>"""
+    from models_db import DeptTaxRegistry
+    
+    pan_clean = req.pan.strip().upper()
+    
+    with Session(engine) as session:
+        tax_rec = session.exec(select(DeptTaxRegistry).where(DeptTaxRegistry.pan_number == pan_clean)).first()
+        if tax_rec:
+            # Found in DB! If caller passed taxpayer_name override (fraud test), use caller name, else DB name
+            tp_name = req.taxpayer_name or tax_rec.taxpayer_name
+        else:
+            # Record NOT found in Income Tax DB -> 404 Error!
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Tax PAN '{pan_clean}' not found in Income Tax Department Database (CBDT Registry)"
+            )
+
+    xml_content = f"""<TaxResult><PAN>{pan_clean}</PAN><TaxpayerName>{tp_name}</TaxpayerName><Status>ACTIVE</Status></TaxResult>"""
     return Response(content=xml_content, media_type="text/xml")
 
 @router.post("/mock/municipality/verify")
@@ -122,20 +170,36 @@ async def verify_municipality(req: MunicipalityVerifyRequest, authorization: Opt
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Municipality Server Unreachable (Simulated Outage)"
         )
+    from models_db import DeptPropertyRegistry
+    owner_code_clean = req.owner_code.strip().upper()
+
+    with Session(engine) as session:
+        prop_rec = session.exec(select(DeptPropertyRegistry).where(DeptPropertyRegistry.owner_code == owner_code_clean)).first()
+        if prop_rec:
+            owner_name = (req.owner_name or prop_rec.owner_name).upper()
+            prop_addr = prop_rec.property_address
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Property Code '{owner_code_clean}' not registered in Municipal Property Database"
+            )
+
     return {
-        "OWNER_CODE": req.owner_code,
-        "OWNER_NAME": "RAHUL KUMAR",
-        "HOUSE_NO": "12A",
-        "LOCALITY": "KUMARANALLUR"
+        "OWNER_CODE": owner_code_clean,
+        "OWNER_NAME": owner_name,
+        "PROPERTY_ADDRESS": prop_addr,
+        "STATUS": "ACTIVE"
     }
 
 @router.post("/mock/business/register")
 async def register_business(req: BusinessRegisterRequest, authorization: Optional[str] = Header(None)):
     validate_department_token(authorization, "registry", "registry:write")
+    reg_id = f"BR-2026-{uuid.uuid4().hex[:5].upper()}"
     return {
-        "registrationNumber": "BR-2026-00121",
+        "registrationNumber": reg_id,
         "status": "REGISTERED",
-        "businessName": req.business_name
+        "businessName": req.business_name or "Apex Technologies",
+        "applicantName": req.applicant_name or "Rahul Kumar"
     }
 
 @router.get("/mock/health/all")

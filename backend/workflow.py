@@ -98,10 +98,11 @@ async def run_workflow(application_id: str, allow_reuse: bool = False, consent_t
     log_audit(application_id, "CONSENT_CHECK", "VERIFIED_ACTIVE_SIGNED_JWT")
     update_application_status(application_id, "IN_PROGRESS")
 
-    # Extract self-declared local IDs from signed consent claims
+    # Extract self-declared local IDs and optional dynamic taxpayer name from signed consent claims
     local_ids = consent_claims.get("local_ids", {})
     pan_from_consent = local_ids.get("tax", "ABCDE1234F")
     owner_code_from_consent = local_ids.get("municipality", "OWN77821")
+    taxpayer_name_from_consent = local_ids.get("taxpayer_name", None)
 
     # Identity Resolution: Create/Resolve GovBridge Person Anchor (e.g. P-10001)
     gb_person_id = resolve_or_create_person(citizen_id, local_ids)
@@ -149,7 +150,9 @@ async def run_workflow(application_id: str, allow_reuse: bool = False, consent_t
             elif step == "tax":
                 # Translate: GovBridge person ID -> tax department PAN local ID
                 dept_local_id = get_local_id(gb_person_id, "tax", default_fallback=pan_from_consent)
-                raw_xml = await connectors.call_tax(dept_local_id)
+                # Pass explicit taxpayer_name override ONLY if provided in consent for fraud testing
+                target_tax_name = taxpayer_name_from_consent
+                raw_xml = await connectors.call_tax(dept_local_id, taxpayer_name=target_tax_name)
                 canonical_obj = mapping.map_tax(raw_xml)
                 # Parse taxpayer name for cross-department fraud check
                 try:
@@ -165,7 +168,7 @@ async def run_workflow(application_id: str, allow_reuse: bool = False, consent_t
             elif step == "address":
                 # Translate: GovBridge person ID -> municipality department owner code
                 dept_local_id = get_local_id(gb_person_id, "municipality", default_fallback=owner_code_from_consent)
-                raw = await connectors.call_municipality(dept_local_id)
+                raw = await connectors.call_municipality(dept_local_id, owner_name=identity_name)
                 canonical_obj = mapping.map_municipality(raw)
                 data_json = canonical_obj.model_dump_json()
 

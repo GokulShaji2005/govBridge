@@ -32,14 +32,19 @@ function ApplyContent() {
   const actParam = searchParams.get("act");
 
   // Portal Citizen Authentication state
-  const [isAuthenticated, setIsAuthenticated] = useState(true);
-  const [citizenId, setCitizenId] = useState("C10291");
-  const [applicantName, setApplicantName] = useState("Rahul Kumar");
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [citizenId, setCitizenId] = useState("");
+  const [applicantName, setApplicantName] = useState("");
   const [citizenToken, setCitizenToken] = useState<string | null>(null);
+
+  // Custom Local Identifiers for Dynamic Workflow Engine
+  const [panNumber, setPanNumber] = useState("");
+  const [ownerCode, setOwnerCode] = useState("");
+  const [simulateFraud, setSimulateFraud] = useState(false);
 
   // Supabase Passwordless OTP Auth state
   const [authMode, setAuthMode] = useState<"DEMO" | "MOBILE_OTP" | "EMAIL_OTP" | "LOGIN">("MOBILE_OTP");
-  const [authMobile, setAuthMobile] = useState("+91 98765 43210");
+  const [authMobile, setAuthMobile] = useState("");
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [supabaseOtpInput, setSupabaseOtpInput] = useState("");
@@ -48,10 +53,10 @@ function ApplyContent() {
   const [authLoading, setAuthLoading] = useState(false);
 
   // Business Application details
-  const [businessName, setBusinessName] = useState("Apex Innovations Pvt Ltd");
+  const [businessName, setBusinessName] = useState("");
   const [companyType, setCompanyType] = useState("Private Limited Company");
-  const [authorizedCapital, setAuthorizedCapital] = useState("10,000,000");
-  const [registeredAddress, setRegisteredAddress] = useState("Plot 42, Cyber Technology Park, Ward 7");
+  const [authorizedCapital, setAuthorizedCapital] = useState("");
+  const [registeredAddress, setRegisteredAddress] = useState("");
   const [serviceType, setServiceType] = useState<"business_registration" | "trade_license">(
     actParam === "2" ? "trade_license" : "business_registration"
   );
@@ -63,14 +68,17 @@ function ApplyContent() {
   const clientKey = serviceType === "business_registration" ? "KEY_BUS_REG_123" : "KEY_TRADE_LIC_456";
 
   // Aadhaar eKYC OTP state
-  const [aadhaarNumber, setAadhaarNumber] = useState("123456789012");
-  const [otpInput, setOtpInput] = useState("123456");
+  const [aadhaarNumber, setAadhaarNumber] = useState("");
+  const [otpInput, setOtpInput] = useState("");
   const [ekycToken, setEkycToken] = useState<string | null>(null);
   const [ekycVerified, setEkycVerified] = useState(false);
 
   const [reuseCheckData, setReuseCheckData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Signout state tracking
+  const [userLoggedOut, setUserLoggedOut] = useState(false);
 
   // Initial Demo Citizen Session initialization
   useEffect(() => {
@@ -90,10 +98,35 @@ function ApplyContent() {
         console.error("Citizen Login error:", err);
       }
     }
-    if (!citizenToken) {
+    if (!citizenToken && !userLoggedOut) {
       loginCitizenSession();
     }
-  }, [citizenId, citizenToken]);
+  }, [citizenId, citizenToken, userLoggedOut]);
+
+  // Fast Demo Session Click Handler
+  const handleFastDemoLogin = async () => {
+    setUserLoggedOut(false);
+    setAuthMode("DEMO");
+    const demoId = citizenId || "C10291";
+    const demoName = applicantName || "Rahul Kumar";
+    setCitizenId(demoId);
+    setApplicantName(demoName);
+    try {
+      const res = await fetch(`${API_BASE}/auth/token-demo`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ citizen_id: demoId, role: "citizen" })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setCitizenToken(data.access_token);
+        setIsAuthenticated(true);
+        setAuthMessage("Fast Demo Session Authenticated!");
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
 
   // Listen to Supabase Auth State Changes
   useEffect(() => {
@@ -104,6 +137,7 @@ function ApplyContent() {
         setApplicantName(meta.full_name || session.user.phone || session.user.email || "Authenticated Citizen");
         setCitizenId(meta.citizen_id || `C${session.user.id.slice(0, 5).toUpperCase()}`);
         setIsAuthenticated(true);
+        setUserLoggedOut(false);
       }
     });
     return () => {
@@ -147,23 +181,30 @@ function ApplyContent() {
       });
       if (error || !data.session) {
         // Fallback demo token grant for presentation testing
+        const generatedId = citizenId || `C${Math.floor(10000 + Math.random() * 90000)}`;
         const res = await fetch(`${API_BASE}/auth/token-demo`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ citizen_id: "C10291", role: "citizen" })
+          body: JSON.stringify({ citizen_id: generatedId, role: "citizen" })
         });
         if (res.ok) {
           const tokData = await res.json();
           setCitizenToken(tokData.access_token);
-          setCitizenId("C10291");
-          setApplicantName("Rahul Kumar");
+          setCitizenId(generatedId);
+          if (!applicantName) setApplicantName("Citizen User");
           setIsAuthenticated(true);
-          setAuthMessage("Passwordless Mobile OTP Verified! Supabase Session Active.");
+          setUserLoggedOut(false);
+          setAuthMessage(`Mobile OTP Verified! Provisioned Citizen ID: ${generatedId}`);
         }
       } else {
+        const supUser = data.session.user;
+        const assignedId = supUser.user_metadata?.citizen_id || `C${supUser.id.slice(0, 5).toUpperCase()}`;
         setCitizenToken(data.session.access_token);
+        setCitizenId(assignedId);
+        if (!applicantName) setApplicantName(supUser.user_metadata?.full_name || supUser.phone || "Citizen User");
         setIsAuthenticated(true);
-        setAuthMessage("Passwordless Mobile OTP Verified! Logged in via Supabase.");
+        setUserLoggedOut(false);
+        setAuthMessage(`Mobile OTP Verified! Provisioned Citizen ID: ${assignedId}`);
       }
     } catch (err: any) {
       setAuthMessage(`Verification error: ${err.message}`);
@@ -192,8 +233,10 @@ function ApplyContent() {
 
   const handleSupabaseSignOut = async () => {
     await supabase.auth.signOut();
+    setUserLoggedOut(true);
     setCitizenToken(null);
     setIsAuthenticated(false);
+    setAuthMessage("You have signed out successfully.");
   };
 
   // 1. Create Application
@@ -222,7 +265,7 @@ function ApplyContent() {
     }
   };
 
-  // 2. Aadhaar eKYC OTP Verification
+  // 2. Aadhaar eKYC OTP Verification (Dynamic citizen metadata)
   const handleVerifyAadhaarOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -234,10 +277,11 @@ function ApplyContent() {
         body: JSON.stringify({
           aadhaar_number: aadhaarNumber,
           otp: otpInput,
-          citizen_id: citizenId
+          citizen_id: citizenId,
+          name: applicantName
         })
       });
-      if (!res.ok) throw new Error("Aadhaar OTP verification failed. Enter 123456.");
+      if (!res.ok) throw new Error("Aadhaar OTP verification failed. Enter demo OTP 123456.");
       const data = await res.json();
       setEkycToken(data.verification_token);
       setEkycVerified(true);
@@ -264,12 +308,13 @@ function ApplyContent() {
     }
   };
 
-  // 3. Grant Purpose Consent & Run Workflow
+  // 3. Grant Purpose Consent & Run Workflow (Dynamic Local IDs & Fraud Simulation Payload)
   const handleGrantConsentAndRun = async () => {
     if (!appId || !citizenToken || !ekycToken) return;
     setLoading(true);
     setErrorMsg(null);
     try {
+      const targetTaxpayerName = simulateFraud ? "Imposter Taxpayer Name" : applicantName;
       const grantRes = await fetch(`${API_BASE}/consent/grant`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -277,7 +322,11 @@ function ApplyContent() {
           citizen_id: citizenId,
           purpose: serviceType,
           data_scope: ["identity:verify", "tax:verify", "address:verify", "registry:write"],
-          local_ids: { tax: "ABCDE1234F", municipality: "OWN77821" },
+          local_ids: { 
+            tax: panNumber, 
+            municipality: ownerCode,
+            taxpayer_name: targetTaxpayerName
+          },
           verification_token: ekycToken
         })
       });
@@ -345,104 +394,164 @@ function ApplyContent() {
           </p>
         </div>
 
-        {/* Authenticated Citizen Session Badge */}
+        {/* Citizen Session Badge */}
         <div className="flex items-center gap-3">
-          <div className="p-3 rounded-2xl bg-white border border-slate-200 shadow-xs flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 font-extrabold text-sm">
-              {applicantName[0]}
-            </div>
-            <div>
-              <div className="text-xs font-bold text-slate-900 flex items-center gap-1">
-                {applicantName} <UserCheck className="w-3.5 h-3.5 text-emerald-600" />
-              </div>
-              <div className="text-[11px] font-mono text-slate-500">Citizen ID: {citizenId}</div>
-            </div>
-          </div>
           {isAuthenticated ? (
-            <button
-              onClick={handleSupabaseSignOut}
-              className="px-3 py-2 text-xs font-bold text-rose-600 hover:bg-rose-50 rounded-xl border border-rose-200 transition-colors"
-            >
-              Sign Out
-            </button>
+            <>
+              <div className="p-3 rounded-2xl bg-white border border-slate-200 shadow-xs flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 font-extrabold text-sm">
+                  {applicantName[0]}
+                </div>
+                <div>
+                  <div className="text-xs font-bold text-slate-900 flex items-center gap-1">
+                    {applicantName} <UserCheck className="w-3.5 h-3.5 text-emerald-600" />
+                  </div>
+                  <div className="text-[11px] font-mono text-slate-500">Citizen ID: {citizenId}</div>
+                </div>
+              </div>
+              <button
+                onClick={handleSupabaseSignOut}
+                className="px-3.5 py-2 text-xs font-bold text-rose-600 hover:bg-rose-50 rounded-xl border border-rose-200 transition-colors"
+              >
+                Sign Out
+              </button>
+            </>
           ) : (
-            <button
-              onClick={() => setAuthMode("MOBILE_OTP")}
-              className="px-3 py-2 text-xs font-bold text-indigo-600 hover:bg-indigo-50 rounded-xl border border-indigo-200 transition-colors"
-            >
-              Sign In
-            </button>
+            <>
+              <div className="px-3.5 py-2 rounded-2xl bg-amber-50 border border-amber-200 text-amber-800 text-xs font-bold flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                Signed Out (Guest)
+              </div>
+              <button
+                onClick={handleFastDemoLogin}
+                className="px-4 py-2 text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-xs transition-colors"
+              >
+                Sign In / Demo
+              </button>
+            </>
           )}
         </div>
       </div>
 
-      {/* Supabase Passwordless Auth Control Bar */}
-      <div className="p-4 rounded-2xl bg-indigo-50/70 border border-indigo-200 flex flex-col md:flex-row items-center justify-between gap-3 text-xs text-indigo-900">
-        <div className="flex items-center gap-2 font-semibold">
-          <Sparkles className="w-4 h-4 text-indigo-600 shrink-0" />
-          <span>Boundary 1 SSO: Passwordless Supabase Authentication Engine</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setAuthMode("MOBILE_OTP")}
-            className={`px-3 py-1.5 rounded-xl font-bold transition-all ${
-              authMode === "MOBILE_OTP" ? "bg-indigo-600 text-white shadow-xs" : "bg-white text-indigo-700 hover:bg-indigo-100 border border-indigo-200"
-            }`}
-          >
-            Mobile OTP (Aadhaar Linked)
-          </button>
-          <button
-            onClick={() => setAuthMode("EMAIL_OTP")}
-            className={`px-3 py-1.5 rounded-xl font-bold transition-all ${
-              authMode === "EMAIL_OTP" ? "bg-indigo-600 text-white shadow-xs" : "bg-white text-indigo-700 hover:bg-indigo-100 border border-indigo-200"
-            }`}
-          >
-            Email Magic Link
-          </button>
-          <button
-            onClick={() => setAuthMode("DEMO")}
-            className={`px-3 py-1.5 rounded-xl font-bold transition-all ${
-              authMode === "DEMO" ? "bg-emerald-600 text-white shadow-xs" : "bg-white text-emerald-700 hover:bg-emerald-100 border border-emerald-200"
-            }`}
-          >
-            Fast Demo Session
-          </button>
-        </div>
-      </div>
-
-      {/* Supabase Passwordless OTP Form Section */}
-      {authMode !== "DEMO" && (
-        <div className="glass-panel rounded-3xl p-6 space-y-4 border border-indigo-200 bg-white">
-          <div className="flex items-center justify-between border-b border-slate-200 pb-3">
-            <h3 className="font-extrabold text-slate-900 text-base flex items-center gap-2">
-              <Smartphone className="w-4 h-4 text-indigo-600" />
-              {authMode === "MOBILE_OTP" && "Passwordless Mobile OTP Login"}
-              {authMode === "EMAIL_OTP" && "Passwordless Email Magic Link"}
-            </h3>
-            <span className="text-xs font-bold font-mono text-indigo-600">Boundary 1 SSO</span>
+      {/* Supabase Passwordless Auth Control Bar (Only when NOT authenticated) */}
+      {!isAuthenticated ? (
+        <>
+          <div className="p-4 rounded-2xl bg-indigo-50/70 border border-indigo-200 flex flex-col md:flex-row items-center justify-between gap-3 text-xs text-indigo-900">
+            <div className="flex items-center gap-2 font-semibold">
+              <Sparkles className="w-4 h-4 text-indigo-600 shrink-0" />
+              <span>Boundary 1 SSO: Passwordless Supabase Authentication Engine</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setAuthMode("MOBILE_OTP")}
+                className={`px-3 py-1.5 rounded-xl font-bold transition-all ${
+                  authMode === "MOBILE_OTP" ? "bg-indigo-600 text-white shadow-xs" : "bg-white text-indigo-700 hover:bg-indigo-100 border border-indigo-200"
+                }`}
+              >
+                Mobile OTP (Aadhaar Linked)
+              </button>
+              <button
+                onClick={() => setAuthMode("EMAIL_OTP")}
+                className={`px-3 py-1.5 rounded-xl font-bold transition-all ${
+                  authMode === "EMAIL_OTP" ? "bg-indigo-600 text-white shadow-xs" : "bg-white text-indigo-700 hover:bg-indigo-100 border border-indigo-200"
+                }`}
+              >
+                Email Magic Link
+              </button>
+              <button
+                onClick={handleFastDemoLogin}
+                className={`px-3 py-1.5 rounded-xl font-bold transition-all ${
+                  authMode === "DEMO" ? "bg-emerald-600 text-white shadow-xs" : "bg-white text-emerald-700 hover:bg-emerald-100 border border-emerald-200"
+                }`}
+              >
+                Fast Demo Session
+              </button>
+            </div>
           </div>
 
-          {authMessage && (
-            <div className="p-3 rounded-xl bg-indigo-50 border border-indigo-200 text-xs font-bold text-indigo-800">
-              {authMessage}
-            </div>
-          )}
+          {/* Supabase Passwordless OTP Form Section */}
+          {authMode !== "DEMO" && (
+            <div className="glass-panel rounded-3xl p-6 space-y-4 border border-indigo-200 bg-white">
+              <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+                <h3 className="font-extrabold text-slate-900 text-base flex items-center gap-2">
+                  <Smartphone className="w-4 h-4 text-indigo-600" />
+                  {authMode === "MOBILE_OTP" && "Passwordless Mobile OTP Login"}
+                  {authMode === "EMAIL_OTP" && "Passwordless Email Magic Link"}
+                </h3>
+                <span className="text-xs font-bold font-mono text-indigo-600">Boundary 1 SSO</span>
+              </div>
 
-          {authMode === "MOBILE_OTP" && (
-            <div className="space-y-4">
-              {!otpSent ? (
-                <form onSubmit={handleSendMobileOtp} className="space-y-4">
+              {authMessage && (
+                <div className="p-3 rounded-xl bg-indigo-50 border border-indigo-200 text-xs font-bold text-indigo-800">
+                  {authMessage}
+                </div>
+              )}
+
+              {authMode === "MOBILE_OTP" && (
+                <div className="space-y-4">
+                  {!otpSent ? (
+                    <form onSubmit={handleSendMobileOtp} className="space-y-4">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">Aadhaar-Registered Mobile Number</label>
+                        <div className="relative">
+                          <PhoneCall className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                          <input
+                            type="text"
+                            required
+                            placeholder="+91 98765 43210"
+                            value={authMobile}
+                            onChange={(e) => setAuthMobile(e.target.value)}
+                            className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-900 focus:outline-none focus:border-indigo-500 font-mono"
+                          />
+                        </div>
+                      </div>
+                      <button
+                        type="submit"
+                        disabled={authLoading}
+                        className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-sm transition-colors shadow-sm"
+                      >
+                        {authLoading ? "Sending OTP..." : "Get Passwordless OTP"}
+                      </button>
+                    </form>
+                  ) : (
+                    <form onSubmit={handleVerifyMobileOtp} className="space-y-4">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">Enter 6-Digit Mobile OTP (Demo: 123456)</label>
+                        <input
+                          type="text"
+                          required
+                          maxLength={6}
+                          placeholder="123456"
+                          value={supabaseOtpInput}
+                          onChange={(e) => setSupabaseOtpInput(e.target.value)}
+                          className="w-full px-4 py-3 bg-white border border-indigo-300 rounded-xl text-center text-xl font-mono font-bold tracking-widest text-indigo-600 focus:outline-none focus:border-indigo-500 shadow-xs"
+                        />
+                      </div>
+                      <button
+                        type="submit"
+                        disabled={authLoading}
+                        className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-sm transition-colors shadow-sm"
+                      >
+                        {authLoading ? "Verifying Session..." : "Verify OTP & Authenticate Session"}
+                      </button>
+                    </form>
+                  )}
+                </div>
+              )}
+
+              {authMode === "EMAIL_OTP" && (
+                <form onSubmit={handleSendEmailOtp} className="space-y-4">
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">Aadhaar-Registered Mobile Number</label>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Citizen Email Address</label>
                     <div className="relative">
-                      <PhoneCall className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                       <input
-                        type="text"
+                        type="email"
                         required
-                        placeholder="+91 98765 43210"
-                        value={authMobile}
-                        onChange={(e) => setAuthMobile(e.target.value)}
-                        className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-900 focus:outline-none focus:border-indigo-500 font-mono"
+                        placeholder="rahul.kumar@govbridge.gov.in"
+                        value={authEmail}
+                        onChange={(e) => setAuthEmail(e.target.value)}
+                        className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-900 focus:outline-none focus:border-indigo-500"
                       />
                     </div>
                   </div>
@@ -451,60 +560,20 @@ function ApplyContent() {
                     disabled={authLoading}
                     className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-sm transition-colors shadow-sm"
                   >
-                    {authLoading ? "Sending OTP..." : "Get Passwordless OTP"}
-                  </button>
-                </form>
-              ) : (
-                <form onSubmit={handleVerifyMobileOtp} className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">Enter 6-Digit Mobile OTP (Demo: 123456)</label>
-                    <input
-                      type="text"
-                      required
-                      maxLength={6}
-                      placeholder="123456"
-                      value={supabaseOtpInput}
-                      onChange={(e) => setSupabaseOtpInput(e.target.value)}
-                      className="w-full px-4 py-3 bg-white border border-indigo-300 rounded-xl text-center text-xl font-mono font-bold tracking-widest text-indigo-600 focus:outline-none focus:border-indigo-500 shadow-xs"
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    disabled={authLoading}
-                    className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-sm transition-colors shadow-sm"
-                  >
-                    {authLoading ? "Verifying Session..." : "Verify OTP & Authenticate Session"}
+                    {authLoading ? "Sending Link..." : "Send Passwordless Magic Login Link"}
                   </button>
                 </form>
               )}
             </div>
           )}
-
-          {authMode === "EMAIL_OTP" && (
-            <form onSubmit={handleSendEmailOtp} className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Citizen Email Address</label>
-                <div className="relative">
-                  <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="email"
-                    required
-                    placeholder="rahul.kumar@govbridge.gov.in"
-                    value={authEmail}
-                    onChange={(e) => setAuthEmail(e.target.value)}
-                    className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-900 focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
-              </div>
-              <button
-                type="submit"
-                disabled={authLoading}
-                className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-sm transition-colors shadow-sm"
-              >
-                {authLoading ? "Sending Link..." : "Send Passwordless Magic Login Link"}
-              </button>
-            </form>
-          )}
+        </>
+      ) : (
+        <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 flex items-center justify-between text-xs text-emerald-900">
+          <div className="flex items-center gap-2 font-bold">
+            <UserCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>Boundary 1 SSO Verified — Active Citizen Session: <code className="font-mono text-emerald-800 bg-emerald-100 px-1.5 py-0.5 rounded">{citizenId || "C10291"}</code></span>
+          </div>
+          <span className="text-[11px] font-semibold text-emerald-700">Authenticated Session Token Active</span>
         </div>
       )}
 
@@ -531,10 +600,35 @@ function ApplyContent() {
 
           <div className="grid md:grid-cols-2 gap-6">
             <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5">Applicant Full Name (eKYC Linked)</label>
+              <input
+                type="text"
+                required
+                placeholder="e.g. Rahul Kumar"
+                value={applicantName}
+                onChange={(e) => setApplicantName(e.target.value)}
+                className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm text-slate-900 font-semibold focus:outline-none focus:border-indigo-500 shadow-xs"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5">Citizen ID Anchor</label>
+              <input
+                type="text"
+                required
+                placeholder="e.g. C10291"
+                value={citizenId}
+                onChange={(e) => setCitizenId(e.target.value)}
+                className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm text-slate-900 font-semibold focus:outline-none focus:border-indigo-500 shadow-xs font-mono"
+              />
+            </div>
+
+            <div>
               <label className="block text-xs font-bold text-slate-700 mb-1.5">Proposed Business Name</label>
               <input
                 type="text"
                 required
+                placeholder="e.g. Apex Innovations Pvt Ltd"
                 value={businessName}
                 onChange={(e) => setBusinessName(e.target.value)}
                 className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm text-slate-900 font-semibold focus:outline-none focus:border-indigo-500 shadow-xs"
@@ -556,22 +650,26 @@ function ApplyContent() {
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5">Proposed Authorized Capital (₹)</label>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5">Tax PAN (Income Tax Dept ID)</label>
               <input
                 type="text"
-                value={authorizedCapital}
-                onChange={(e) => setAuthorizedCapital(e.target.value)}
+                required
+                placeholder="e.g. ABCDE1234F"
+                value={panNumber}
+                onChange={(e) => setPanNumber(e.target.value.toUpperCase())}
                 className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm text-slate-900 font-semibold focus:outline-none focus:border-indigo-500 shadow-xs font-mono"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5">Primary Director / Applicant</label>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5">Municipal Property Code</label>
               <input
                 type="text"
-                disabled
-                value={`${applicantName} (${citizenId})`}
-                className="w-full px-4 py-2.5 bg-slate-100 border border-slate-200 rounded-xl text-sm text-slate-700 font-semibold cursor-not-allowed"
+                required
+                placeholder="e.g. OWN77821"
+                value={ownerCode}
+                onChange={(e) => setOwnerCode(e.target.value.toUpperCase())}
+                className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm text-slate-900 font-semibold focus:outline-none focus:border-indigo-500 shadow-xs font-mono"
               />
             </div>
 
@@ -580,10 +678,34 @@ function ApplyContent() {
               <input
                 type="text"
                 required
+                placeholder="e.g. Plot 42, Cyber Technology Park, Ward 7"
                 value={registeredAddress}
                 onChange={(e) => setRegisteredAddress(e.target.value)}
                 className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm text-slate-900 font-semibold focus:outline-none focus:border-indigo-500 shadow-xs"
               />
+            </div>
+
+            {/* Interactive Fraud Engine Simulation Toggle */}
+            <div className="md:col-span-2 p-4 rounded-2xl bg-amber-50/70 border border-amber-200 flex items-center justify-between gap-4">
+              <div>
+                <span className="text-xs font-bold text-amber-900 flex items-center gap-1.5">
+                  <AlertCircle className="w-4 h-4 text-amber-600" /> Interactive Fraud Safeguard Simulator
+                </span>
+                <p className="text-[11px] text-amber-800 mt-0.5">
+                  Toggle to simulate mismatched Tax PAN identity ("Imposter Name") to test GovBridge's live fraud detection & manual review flagging!
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSimulateFraud(!simulateFraud)}
+                className={`px-4 py-2 rounded-xl text-xs font-extrabold transition-all shadow-xs shrink-0 ${
+                  simulateFraud
+                    ? "bg-rose-600 text-white shadow-rose-200"
+                    : "bg-white text-slate-700 hover:bg-slate-50 border border-slate-300"
+                }`}
+              >
+                {simulateFraud ? "⚠️ Fraud Mismatch ACTIVE" : "Normal Clean Application"}
+              </button>
             </div>
           </div>
 

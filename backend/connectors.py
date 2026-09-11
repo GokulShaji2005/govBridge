@@ -1,5 +1,5 @@
 import httpx
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from mock_departments import (
     verify_identity, verify_tax, verify_municipality, register_business,
     IdentityVerifyRequest, TaxVerifyRequest, MunicipalityVerifyRequest, BusinessRegisterRequest
@@ -16,13 +16,13 @@ async def call_identity(citizen_id: str) -> Dict[str, Any]:
     req = IdentityVerifyRequest(citizen_id=citizen_id)
     return await verify_identity(req, authorization=f"Bearer {DEPT_KEYS['identity']}")
 
-async def call_tax(pan: str) -> str:
-    req = TaxVerifyRequest(pan=pan)
+async def call_tax(pan: str, taxpayer_name: Optional[str] = None) -> str:
+    req = TaxVerifyRequest(pan=pan, taxpayer_name=taxpayer_name)
     res = await verify_tax(req, authorization=f"Bearer {DEPT_KEYS['tax']}")
     return res.body.decode("utf-8")
 
-async def call_municipality(owner_code: str) -> Dict[str, Any]:
-    req = MunicipalityVerifyRequest(owner_code=owner_code)
+async def call_municipality(owner_code: str, owner_name: Optional[str] = None) -> Dict[str, Any]:
+    req = MunicipalityVerifyRequest(owner_code=owner_code, owner_name=owner_name)
     return await verify_municipality(req, authorization=f"Bearer {DEPT_KEYS['municipality']}")
 
 async def call_registry(payload: Dict[str, Any]) -> Dict[str, Any]:
